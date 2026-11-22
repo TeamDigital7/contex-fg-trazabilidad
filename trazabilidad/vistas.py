@@ -178,3 +178,79 @@ def linea_de_tiempo(p: Pedido) -> str:
             '</li>'
         )
     return f'<ul class="timeline caja">{"".join(filas)}</ul>'
+
+
+def boton_compartir(texto: str, documentos: list, enlace_wa: str) -> str:
+    """Botón que comparte el mensaje con el PDF y el Excel adjuntos, SIN la API de WhatsApp.
+
+    Usa el menú "Compartir" del sistema (Web Share API): en el celular se elige
+    WhatsApp y el contacto, y llegan el texto y los dos archivos. No necesita token.
+
+    Va dentro del iframe de Streamlit, que no tiene permiso `web-share`; por eso
+    se llama al `navigator.share` de la página principal (mismo origen) y el del
+    iframe queda de respaldo. Donde el navegador no comparte archivos (algunos
+    computadores), se descargan los archivos y se abre WhatsApp con el texto.
+    """
+    import base64
+    import json
+
+    datos = {
+        "texto": texto,
+        "wa": enlace_wa,
+        "docs": [{"nombre": d.nombre, "mime": d.mime, "b64": base64.b64encode(d.contenido).decode()}
+                 for d in documentos],
+    }
+    # "</" cerraría el <script> antes de tiempo: se escapa.
+    carga = json.dumps(datos).replace("</", "<\\/")
+    return """<!doctype html><html><head><meta charset="utf-8">
+<style>
+ body{margin:0;font-family:Inter,system-ui,-apple-system,sans-serif}
+ button{width:100%;min-height:46px;border:0;border-radius:10px;background:#1FA855;color:#fff;
+        font-size:15px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px}
+ button:hover{background:#178A45}
+ .sub{font-size:12px;color:#667085;text-align:center;margin-top:5px}
+ .estado{font-size:12.5px;color:#475467;margin-top:7px;line-height:1.4;min-height:16px}
+</style></head><body>
+<button id="b" type="button">
+ <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+  stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/>
+  <path d="m16 6-4-4-4 4"/><path d="M12 2v13"/></svg>
+ Compartir por WhatsApp</button>
+<div class="sub">Mensaje + PDF + Excel · elige WhatsApp y el chat</div>
+<div class="estado" id="e"></div>
+<script>
+const DATOS = """ + carga + """;
+const estado = t => document.getElementById("e").textContent = t;
+function archivo(d) {
+  const bin = atob(d.b64), u = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+  return new File([u], d.nombre, {type: d.mime});
+}
+async function compartir() {
+  const files = DATOS.docs.map(archivo);
+  const paquete = {text: DATOS.texto, files: files};
+  const navegadores = [];
+  try { navegadores.push(window.parent.navigator); } catch (e) {}
+  navegadores.push(navigator);
+  for (const n of navegadores) {
+    try {
+      if (n.canShare && n.canShare(paquete)) {
+        await n.share(paquete);
+        estado("Listo. Revisa tu WhatsApp: deben estar el mensaje y los dos archivos.");
+        return;
+      }
+    } catch (err) {
+      if (err && err.name === "AbortError") { estado("Cancelado."); return; }
+    }
+  }
+  for (const f of files) {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(f); a.download = f.name;
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+  window.open(DATOS.wa, "_blank");
+  estado("Este navegador no deja compartir archivos: se descargaron y se abrió WhatsApp con el texto. " +
+         "Adjúntalos desde Descargas. En el celular el botón comparte todo junto.");
+}
+document.getElementById("b").addEventListener("click", compartir);
+</script></body></html>"""

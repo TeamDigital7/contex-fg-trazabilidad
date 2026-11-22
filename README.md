@@ -70,6 +70,11 @@ de `contacto`); si no viene, se escribe en la ventana antes de enviar.
 
 ### Probarlo primero en tu propio WhatsApp
 
+**Sin ningún token:** en la ventana, el botón verde **«Compartir por WhatsApp»** abre el
+menú *Compartir* del celular con el mensaje, el PDF y el Excel adjuntos; se elige
+WhatsApp y el propio chat. En un computador que no comparte archivos, los descarga
+y abre WhatsApp con el texto.
+
 La ventana tiene **«Enviar a: Mi número (prueba) | Cliente»** y abre siempre en
 *Mi número*. Con `numero_pruebas` en Secrets tu número ya viene escrito, y con
 `solo_pruebas = true` el envío a clientes queda bloqueado mientras pruebas.

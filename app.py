@@ -177,6 +177,15 @@ def cliente_whatsapp() -> tuple[whatsapp.WhatsAppCloud | None, str]:
         return None, str(exc)
 
 
+def incrustar_html(html: str, alto: int) -> None:
+    """HTML con JavaScript propio. `st.iframe` en Streamlit nuevo; `components.html` en 1.50-1.6x."""
+    if hasattr(st, "iframe"):
+        st.iframe(html, height=alto)
+    else:  # pragma: no cover - versiones viejas de Streamlit
+        import streamlit.components.v1 as components
+        components.html(html, height=alto)
+
+
 A_MI = "Mi número (prueba)"
 A_CLIENTE = "Cliente"
 
@@ -234,16 +243,19 @@ def dialogo_whatsapp(titulo: str, telefono_inicial: str, texto: str, variables: 
                 if destino == A_MI:
                     st.info("Revisa tu WhatsApp. Si el mensaje te llegó bien, cambia arriba a **Cliente**.")
     else:
-        st.info("**Modo demostración.** La API de WhatsApp Business todavía no está conectada: este botón "
-                "abre WhatsApp con el mensaje ya escrito y tú lo envías. Si pones tu número, te abre el "
-                "chat contigo mismo. Los archivos se adjuntan a mano (están aquí abajo).")
-        st.link_button(f"Abrir WhatsApp · {etiqueta_boton.lower()}", whatsapp.enlace_wa_me(telefono, texto),
-                       type="primary", icon=":material/chat:", width="stretch", disabled=not telefono)
-        columnas = st.columns(len(documentos))
-        for col, doc in zip(columnas, documentos):
-            with col:
-                st.download_button(doc.nombre, doc.contenido, file_name=doc.nombre, mime=doc.mime,
-                                   icon=":material/download:", width="stretch", key=f"wsp_doc_{clave}_{doc.nombre}")
+        st.info("**Prueba sin configurar nada.** El botón verde abre el menú *Compartir* del celular con "
+                "el mensaje, el PDF y el Excel: elige **WhatsApp** y luego **tu propio chat** (o el del "
+                "cliente). Cuando se conecte la API de WhatsApp Business, el envío será directo con un clic.")
+        incrustar_html(vistas.boton_compartir(texto, documentos, whatsapp.enlace_wa_me(telefono, texto)), 118)
+        st.link_button("Solo el texto (abrir WhatsApp)", whatsapp.enlace_wa_me(telefono, texto),
+                       icon=":material/chat:", width="stretch")
+        with st.expander("Descargar los archivos"):
+            columnas = st.columns(len(documentos))
+            for col, doc in zip(columnas, documentos):
+                with col:
+                    st.download_button(doc.nombre, doc.contenido, file_name=doc.nombre, mime=doc.mime,
+                                       icon=":material/download:", width="stretch",
+                                       key=f"wsp_doc_{clave}_{doc.nombre}")
 
     envios = st.session_state.get("envios_wsp", [])
     if envios:

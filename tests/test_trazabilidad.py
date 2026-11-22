@@ -238,6 +238,14 @@ class WhatsApp(unittest.TestCase):
         self.assertFalse(res.enviado)
         self.assertEqual(res.pasos[0].estado, "error")
 
+    def test_boton_compartir_lleva_los_archivos_y_no_rompe_el_script(self):
+        import base64
+        docs = self.docs + [self.w.Documento(b"x", "a.pdf", self.w.MIME_PDF)]
+        html = vistas.boton_compartir("Hola </script><b>", docs, "https://wa.me/?text=x")
+        self.assertEqual(html.count("</script>"), 1)  # el texto no cierra el script
+        self.assertIn(base64.b64encode(b"%PDF-1").decode(), html)
+        self.assertIn("navigator.share", html)
+
     def test_sin_numero_no_envia(self):
         meta = FalsoMeta()
         res = self.w.WhatsAppCloud("T", "999", abrir=meta).enviar_avance("", "x", [], self.docs)
