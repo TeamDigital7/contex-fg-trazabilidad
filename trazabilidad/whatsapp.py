@@ -281,11 +281,12 @@ class WhatsAppCloud:
                 if pdf is None:
                     raise ErrorWhatsApp("La plantilla necesita el PDF como cabecera.")
                 media = self.subir(pdf)
-                self.enviar_plantilla(telefono, variables, media, pdf.nombre)
-                res.pasos.append(Paso("Mensaje", "ok", f"Plantilla «{self.plantilla}» con {pdf.nombre}"))
-            else:  # sin plantilla: texto libre, solo vale si el cliente escribió en 24 h
-                self.enviar_texto(telefono, texto)
-                res.pasos.append(Paso("Mensaje", "ok", "Texto libre"))
+                wamid = self.enviar_plantilla(telefono, variables, media, pdf.nombre)
+                res.pasos.append(Paso("Mensaje", "ok",
+                                      f"WhatsApp lo aceptó (plantilla «{self.plantilla}» con {pdf.nombre}) · id {wamid}"))
+            else:  # sin plantilla: texto libre, solo vale si el destino escribió en las últimas 24 h
+                wamid = self.enviar_texto(telefono, texto)
+                res.pasos.append(Paso("Mensaje", "ok", f"WhatsApp lo aceptó (texto libre) · id {wamid}"))
                 if pdf is not None:
                     resto.insert(0, pdf)
         except ErrorWhatsApp as exc:
@@ -294,8 +295,8 @@ class WhatsAppCloud:
 
         for doc in resto:
             try:
-                self.enviar_documento(telefono, self.subir(doc), doc.nombre)
-                res.pasos.append(Paso(doc.nombre, "ok", "Enviado"))
+                wamid = self.enviar_documento(telefono, self.subir(doc), doc.nombre)
+                res.pasos.append(Paso(doc.nombre, "ok", f"WhatsApp lo aceptó · id {wamid}"))
             except ErrorWhatsApp as exc:
                 estado = "aviso" if exc.codigo == CODIGO_FUERA_DE_VENTANA else "error"
                 res.pasos.append(Paso(doc.nombre, estado, _explicar(exc)))
@@ -306,6 +307,9 @@ def _explicar(exc: ErrorWhatsApp) -> str:
     if exc.codigo == CODIGO_FUERA_DE_VENTANA:
         return ("WhatsApp solo permite enviar archivos sueltos si el cliente escribió en las últimas "
                 "24 h. El mensaje con el PDF sí llegó; el Excel se puede reenviar cuando responda.")
+    if exc.codigo == 131030:
+        return ("Con el número de prueba de Meta solo se puede enviar a los números agregados como "
+                "destinatarios en el panel de la app (WhatsApp → API Setup → «To»).")
     if exc.codigo == 132001:
         return "La plantilla no existe o no está aprobada en Meta para ese idioma."
     if exc.codigo in (190, 401):

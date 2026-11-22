@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import base64
 import json
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 import pandas as pd
@@ -176,45 +176,76 @@ def cliente_whatsapp() -> whatsapp.WhatsAppCloud | None:
         return None
 
 
+A_MI = "Mi número (prueba)"
+A_CLIENTE = "Cliente"
+
+
 @st.dialog("Enviar por WhatsApp", width="large")
 def dialogo_whatsapp(titulo: str, telefono_inicial: str, texto: str, variables: list[str],
                      documentos: list[whatsapp.Documento], clave: str) -> None:
     api = cliente_whatsapp()
+    config = seccion_de_secrets("whatsapp")
+    numero_pruebas = str(config.get("numero_pruebas", "") or "")
+    solo_pruebas = str(config.get("solo_pruebas", "")).strip().lower() in ("true", "1", "si", "sí")
+
     st.markdown(f"**{titulo}**")
-    telefono_txt = st.text_input("Número de WhatsApp del cliente", value=telefono_inicial,
-                                 placeholder="987 654 321  o  +51 987 654 321",
-                                 icon=":material/call:", key=f"wsp_tel_{clave}")
+    destino = st.segmented_control(
+        "Enviar a", [A_MI, A_CLIENTE], default=A_MI, key=f"wsp_destino_{clave}", width="stretch",
+        help="Primero envíatelo a ti para ver cómo llega. Cuando estés conforme, envíalo al cliente.")
+    destino = destino or A_MI
+    if destino == A_MI:
+        telefono_txt = st.text_input("Tu número de WhatsApp", value=numero_pruebas,
+                                     placeholder="987 654 321", icon=":material/person:",
+                                     key=f"wsp_tel_yo_{clave}")
+    else:
+        telefono_txt = st.text_input("Número de WhatsApp del cliente", value=telefono_inicial,
+                                     placeholder="987 654 321  o  +51 987 654 321",
+                                     icon=":material/call:", key=f"wsp_tel_{clave}")
     telefono = whatsapp.normalizar_telefono(telefono_txt)
     if telefono_txt and not telefono:
         st.warning("Ese número no parece válido. Escribe el celular con 9 dígitos o con código de país.")
+    bloqueado = destino == A_CLIENTE and solo_pruebas
+    if bloqueado:
+        st.warning("**Modo pruebas activo** (`solo_pruebas = true` en Secrets): por ahora solo se puede "
+                   "enviar a tu número. Quítalo cuando la plantilla esté aprobada y probada.")
 
     st.markdown('<div class="wsp-burbuja">' + vistas.esc(texto).replace("\n", "<br>")
                 .replace("*", "") + "</div>", unsafe_allow_html=True)
     adjuntos = " ".join(f'<span class="wsp-adjunto">📎 {vistas.esc(d.nombre)}</span>' for d in documentos)
     st.markdown(f'<div class="wsp-adjuntos">{adjuntos}</div>', unsafe_allow_html=True)
 
+    etiqueta_boton = "Enviarme la prueba" if destino == A_MI else "Enviar al cliente"
     if api is not None:
-        if st.button("Enviar ahora", type="primary", icon=":material/send:", width="stretch",
-                     disabled=not telefono, key=f"wsp_enviar_{clave}"):
+        if st.button(etiqueta_boton, type="primary", icon=":material/send:", width="stretch",
+                     disabled=not telefono or bloqueado, key=f"wsp_enviar_{clave}"):
             with st.spinner("Enviando por WhatsApp…"):
                 resultado = api.enviar_avance(telefono, texto, variables, documentos)
             for paso in resultado.pasos:
                 {"ok": st.success, "aviso": st.warning, "error": st.error}[paso.estado](
                     f"**{paso.nombre}:** {paso.detalle}")
             if resultado.enviado:
-                st.session_state.setdefault("envios_wsp", []).append((titulo, telefono))
+                st.session_state.setdefault("envios_wsp", []).append(
+                    {"Hora": datetime.now().strftime("%H:%M:%S"), "Envío": titulo, "Destino": destino,
+                     "Número": "+" + telefono,
+                     "Resultado": ", ".join(f"{p.nombre}: {p.estado}" for p in resultado.pasos)})
+                if destino == A_MI:
+                    st.info("Revisa tu WhatsApp. Si el mensaje te llegó bien, cambia arriba a **Cliente**.")
     else:
-        st.info("**Modo demostración.** Todavía no está conectada la API de WhatsApp Business, así que "
-                "este botón abre WhatsApp con el mensaje ya escrito. Los archivos se adjuntan a mano "
-                "(están aquí abajo). Con la API conectada, el envío del mensaje, el PDF y el Excel "
-                "es automático con un clic.")
-        st.link_button("Abrir WhatsApp con el mensaje", whatsapp.enlace_wa_me(telefono, texto),
-                       type="primary", icon=":material/chat:", width="stretch")
+        st.info("**Modo demostración.** La API de WhatsApp Business todavía no está conectada: este botón "
+                "abre WhatsApp con el mensaje ya escrito y tú lo envías. Si pones tu número, te abre el "
+                "chat contigo mismo. Los archivos se adjuntan a mano (están aquí abajo).")
+        st.link_button(f"Abrir WhatsApp · {etiqueta_boton.lower()}", whatsapp.enlace_wa_me(telefono, texto),
+                       type="primary", icon=":material/chat:", width="stretch", disabled=not telefono)
         columnas = st.columns(len(documentos))
         for col, doc in zip(columnas, documentos):
             with col:
                 st.download_button(doc.nombre, doc.contenido, file_name=doc.nombre, mime=doc.mime,
                                    icon=":material/download:", width="stretch", key=f"wsp_doc_{clave}_{doc.nombre}")
+
+    envios = st.session_state.get("envios_wsp", [])
+    if envios:
+        with st.expander(f"Envíos de esta sesión ({len(envios)})"):
+            st.dataframe(pd.DataFrame(envios[::-1]), hide_index=True, width="stretch")
 
 
 def abrir_whatsapp_de_pedido(p: Pedido, hoy: date, es_demo: bool, dias: int) -> None:

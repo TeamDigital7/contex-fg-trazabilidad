@@ -210,6 +210,15 @@ class WhatsApp(unittest.TestCase):
         self.assertEqual(res.pasos[-1].estado, "aviso")
         self.assertIn("24 h", res.pasos[-1].detalle)
 
+    def test_sin_plantilla_va_texto_libre_y_dos_archivos(self):
+        import json
+        meta = FalsoMeta()
+        api = self.w.WhatsAppCloud("T", "999", plantilla="", abrir=meta)
+        res = api.enviar_avance("51987654321", "Hola", ["a"] * 6, self.docs)
+        tipos = [json.loads(c)["type"] for u, _, c, _ in meta.peticiones if u.endswith("messages")]
+        self.assertEqual(tipos, ["text", "document", "document"])
+        self.assertTrue(all("id wamid.1" in p.detalle for p in res.pasos))
+
     def test_sin_numero_no_envia(self):
         meta = FalsoMeta()
         res = self.w.WhatsAppCloud("T", "999", abrir=meta).enviar_avance("", "x", [], self.docs)
@@ -312,6 +321,7 @@ class App(unittest.TestCase):
         at.button(key="wsp_pedido").click().run()
         self.assertFalse(at.exception, at.exception)
         self.assertFalse(at.error, [e.value for e in at.error])
+        self.assertEqual(at.segmented_control[-1].value, "Mi número (prueba)")  # primero, a uno mismo
         self.assertIn("wa.me", " ".join(str(b.proto) for b in at.get("link_button")))
         at = self.correr(vista="Minera Los Andes S.A.C. (demo)")
         at.button(key="wsp_cliente").click().run()

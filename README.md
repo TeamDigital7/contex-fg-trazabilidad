@@ -68,6 +68,24 @@ de `contacto`); si no viene, se escribe en la ventana antes de enviar.
   últimas 24 h; si no, la app lo avisa (el mensaje y el PDF sí llegan).
   Meta cobra por conversación iniciada por la empresa.
 
+### Probarlo primero en tu propio WhatsApp
+
+La ventana tiene **«Enviar a: Mi número (prueba) | Cliente»** y abre siempre en
+*Mi número*. Con `numero_pruebas` en Secrets tu número ya viene escrito, y con
+`solo_pruebas = true` el envío a clientes queda bloqueado mientras pruebas.
+
+- **Hoy (sin API):** pon tu número y pulsa «Abrir WhatsApp»: se abre el chat contigo
+  mismo con el mensaje escrito. Así ves el speech tal como lo verá el cliente.
+- **Con la API, sin esperar la aprobación de la plantilla:** Meta da gratis un
+  *número de prueba* en developers.facebook.com (app de tipo Business → WhatsApp →
+  API Setup). Agrega tu celular como destinatario (te llega un código), copia el
+  token temporal y el *Phone number ID* a `[whatsapp]` con `plantilla = ""`.
+  Escribe «hola» desde tu celular al número de prueba (abre la ventana de 24 h) y
+  pulsa **«Enviarme la prueba»**: te llegan el mensaje, el PDF y el Excel.
+- La app muestra el id que devuelve WhatsApp por cada envío: quiere decir que Meta
+  lo **aceptó**. La confirmación de *entregado / leído* (los dos checks) requiere un
+  webhook, que es un paso aparte.
+
 ## Correr y desplegar
 
 ```bash
