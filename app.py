@@ -75,7 +75,24 @@ def logo_base64() -> str:
 def ir_a(pagina: str) -> None:
     """on_click del menú: un clic, un rerun."""
     st.session_state["pagina"] = pagina
+    st.session_state["cerrar_menu_movil"] = True
     st.query_params.pop("pedido", None)
+
+
+CERRAR_MENU_MOVIL = """<script>
+// En el celular el menú lateral tapa la pantalla: tras elegir una opción se cierra solo.
+// En escritorio (más de 640 px) no se toca.
+try {
+  const p = window.parent;
+  if (p.innerWidth <= 640) {
+    const b = p.document.querySelector('[data-testid="stSidebarCollapseButton"] button')
+           || p.document.querySelector('[data-testid="stSidebarCollapseButton"]');
+    const s = p.document.querySelector('[data-testid="stSidebar"]');
+    const abierto = s && (s.getAttribute('data-collapsed') === 'false' || s.getAttribute('aria-expanded') === 'true');
+    if (b && abierto) b.click();
+  }
+} catch (e) {}
+</script>"""
 
 
 SUFIJOS = ("S.A.C.", "S.A.A.", "S.A.", "E.I.R.L.", "S.R.L.", "(demo)")
@@ -143,6 +160,11 @@ def barra_lateral(clientes: dict[str, int], fuente: str, es_demo: bool) -> tuple
             cargar.clear()
             st.rerun()
     return vista, actual
+
+
+def cerrar_menu_si_hace_falta() -> None:
+    if st.session_state.pop("cerrar_menu_movil", False):
+        incrustar_html(CERRAR_MENU_MOVIL, 1)
 
 
 def encabezado(titulo: str, subtitulo: str, fuente: str, es_demo: bool, ruta: str = "Seguimiento") -> None:
@@ -712,6 +734,7 @@ def main() -> None:
     for p in pedidos:
         clientes[p.cliente] = clientes.get(p.cliente, 0) + 1
     vista, pagina = barra_lateral(clientes, fuente, es_demo)
+    cerrar_menu_si_hace_falta()
     visibles = pedidos if vista == INTERNO else [p for p in pedidos if p.cliente == vista]
 
     codigo = parametro("pedido")
