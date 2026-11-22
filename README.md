@@ -45,6 +45,9 @@ python tests/test_trazabilidad.py
 
 En Streamlit Community Cloud: *New app* → este repositorio → `app.py`.
 
+La barra lateral lleva el logo de Contex FYG (`assets/logo_contex.png`) y el menú
+con botones; los colores salen del logo (azul marino `#12386B` y gris `#909090`).
+
 ## Estructura
 
 ```

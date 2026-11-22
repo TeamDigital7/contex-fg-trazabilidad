@@ -35,15 +35,15 @@ def tarjeta(p: Pedido, hoy: date, vista: str, seleccionado: str = "", dias_produ
         barra = (f'<div class="barra" title="Avance {p.avance_produccion:.0%}">'
                  f'<span style="width:{p.avance_produccion * 100:.0f}%"></span></div>')
     entrega = p.fecha_entregado if p.entregado and p.fecha_entregado else p.fecha_entrega
-    clase = "tarjeta activa" if p.codigo == seleccionado else "tarjeta"
+    clase = f"tarjeta tono-{tono}" + (" activa" if p.codigo == seleccionado else "")
     return (
         f'<a class="{clase}" href="{esc(enlace(pedido=p.codigo, vista=vista))}" target="_self">'
         f'<div class="codigo">{esc(p.codigo)}</div>'
         f'<div class="cliente">{esc(p.cliente)}</div>'
         f'<div class="productos">{esc(p.resumen)}</div>'
         f'{barra}'
-        f'<div class="chip {tono}">{esc(texto)}</div>'
-        f'<div class="entrega">Entrega {fecha_corta(entrega)}</div>'
+        f'<div class="pie"><span class="chip {tono}">{esc(texto)}</span>'
+        f'<span class="entrega">{fecha_corta(entrega)}</span></div>'
         f'</a>'
     )
 
@@ -65,14 +65,27 @@ def tablero(pedidos: list[Pedido], hoy: date, vista: str, seleccionado: str = ""
             f'</section>'
         )
     return (
-        '<div class="tablero-cab">Cada etapa deja su registro ISO automáticamente</div>'
+        '<div class="tablero-cab"><b>Pedidos por etapa</b>'
+        '<span>Cada etapa deja su registro ISO automáticamente</span></div>'
         f'<div class="tablero">{"".join(columnas)}</div>'
     )
 
 
-def indicador(titulo: str, valor: str, nota: str = "", tono: str = "") -> str:
-    return (f'<div class="kpi {tono}"><div class="kpi-t">{esc(titulo)}</div>'
-            f'<div class="kpi-v">{esc(valor)}</div><div class="kpi-n">{esc(nota)}</div></div>')
+ICONOS = {
+    "caja": '<path d="M21 8 12 3 3 8v8l9 5 9-5V8Z"/><path d="m3 8 9 5 9-5M12 13v8"/>',
+    "alerta": '<path d="M12 9v4m0 4h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/>',
+    "escudo": '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/>',
+    "reloj": '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    "estrella": '<path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1 6.2L12 17.3 6.5 20.2l1-6.2L3 9.6l6.2-.9L12 3Z"/>',
+}
+
+
+def indicador(titulo: str, valor: str, nota: str = "", tono: str = "", icono: str = "caja") -> str:
+    svg = (f'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+           f'stroke-linecap="round" stroke-linejoin="round">{ICONOS[icono]}</svg>')
+    return (f'<div class="kpi {tono}"><div class="kpi-ico">{svg}</div><div>'
+            f'<div class="kpi-t">{esc(titulo)}</div><div class="kpi-v">{esc(valor)}</div>'
+            f'<div class="kpi-n">{esc(nota)}</div></div></div>')
 
 
 def fila_indicadores(ind: dict) -> str:
@@ -80,13 +93,13 @@ def fila_indicadores(ind: dict) -> str:
     satis = "—" if ind["satisfaccion"] is None else f"{ind['satisfaccion']:.1f} / 5"
     prendas = f"{ind['prendas_en_curso']:,}".replace(",", ".")
     return '<div class="kpis">' + "".join([
-        indicador("Pedidos en curso", str(ind["activos"]), f"{prendas} prendas"),
+        indicador("Pedidos en curso", str(ind["activos"]), f"{prendas} prendas", icono="caja"),
         indicador("En riesgo o atrasados", str(ind["en_riesgo"]), "requieren atención",
-                  "alerta" if ind["en_riesgo"] else ""),
+                  "alerta" if ind["en_riesgo"] else "bien", "alerta"),
         indicador("No conformes abiertos", str(ind["no_conformes"]), "ISO 8.7",
-                  "aviso" if ind["no_conformes"] else ""),
-        indicador("Entregas a tiempo", a_tiempo, f"{ind['entregados']} entregados"),
-        indicador("Satisfacción", satis, "ISO 9.1.2"),
+                  "aviso" if ind["no_conformes"] else "bien", "escudo"),
+        indicador("Entregas a tiempo", a_tiempo, f"{ind['entregados']} entregados", icono="reloj"),
+        indicador("Satisfacción", satis, "Encuesta ISO 9.1.2", icono="estrella"),
     ]) + "</div>"
 
 
@@ -103,7 +116,7 @@ def stepper(p: Pedido) -> str:
         pasos.append(f'<div class="paso {estado}"><div class="bola">{marca}</div>'
                      f'<div class="paso-n">{esc(etapa.nombre)}</div>'
                      f'<div class="paso-r">{esc(etapa.referencia)}</div></div>')
-    return f'<div class="stepper">{"".join(pasos)}</div>'
+    return f'<div class="stepper caja">{"".join(pasos)}</div>'
 
 
 def subetapas(p: Pedido) -> str:
@@ -114,7 +127,7 @@ def subetapas(p: Pedido) -> str:
     for i, nombre in enumerate(SUBETAPAS_PRODUCCION):
         estado = "hecho" if i < actual else ("actual" if i == actual else "pendiente")
         items.append(f'<span class="sub {estado}">{esc(nombre)}</span>')
-    return (f'<div class="subetapas"><div class="sub-t">Producción · {p.avance_produccion:.0%}</div>'
+    return (f'<div class="subetapas caja"><div class="sub-t">Producción · {p.avance_produccion:.0%}</div>'
             f'{"".join(items)}</div>')
 
 
@@ -122,7 +135,7 @@ def cabecera_pedido(p: Pedido, hoy: date, dias_produccion: int = 15) -> str:
     texto, tono = etiqueta(p, hoy, dias_produccion)
     avance = avance_general(p)
     return (
-        '<div class="detalle-cab">'
+        '<div class="detalle-cab caja">'
         f'<div><div class="codigo">{esc(p.codigo)}</div>'
         f'<h2>{esc(p.cliente)}</h2>'
         f'<div class="productos">{esc(p.resumen)} prendas</div></div>'
@@ -153,4 +166,4 @@ def linea_de_tiempo(p: Pedido) -> str:
             f'<div class="t-pie">{esc(e.responsable)} {evidencia}</div></div>'
             '</li>'
         )
-    return f'<ul class="timeline">{"".join(filas)}</ul>'
+    return f'<ul class="timeline caja">{"".join(filas)}</ul>'

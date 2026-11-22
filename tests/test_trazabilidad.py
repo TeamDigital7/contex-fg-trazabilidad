@@ -150,29 +150,36 @@ class App(unittest.TestCase):
         texto = self.html(at)
         for etapa in ETAPAS:
             self.assertIn(vistas.esc(etapa.nombre), texto)
-        self.assertIn("DATOS DE DEMOSTRACIÓN", texto)
+        self.assertIn("Datos de demostración", texto)
 
     def test_vista_de_cliente_solo_ve_lo_suyo(self):
         at = self.correr(vista="Minera Los Andes S.A.C. (demo)")
         texto = self.html(at)
         self.assertIn("Minera Los Andes", texto)
         self.assertNotIn("Pesquera Mar Azul", texto)
-        self.assertNotIn("Conexión de datos", [o for r in at.radio for o in r.options])
+        self.assertNotIn("nav_Conexión de datos", [b.key for b in at.button])
 
     def test_detalle(self):
         at = self.correr(pedido="PED-2026-0012")
         texto = self.html(at)
-        self.assertIn("Registro", " ".join(s.value for s in at.subheader))
+        self.assertIn("Registro de la trazabilidad", texto)
         self.assertIn("ISO 8.7", texto)
 
     def test_cliente_no_abre_pedidos_ajenos(self):
         at = self.correr(vista="Minera Los Andes S.A.C. (demo)", pedido="PED-2026-0012")
         self.assertNotIn("Constructora Pacífico", self.html(at))
 
+    def test_el_menu_no_usa_radios_y_lleva_el_logo(self):
+        at = self.correr()
+        self.assertFalse(at.radio)
+        self.assertIn("logo-caja", self.html(at))
+        activos = [b.key for b in at.button if b.key.startswith("nav_") and b.proto.type == "primary"]
+        self.assertEqual(activos, ["nav_Tablero"])
+
     def test_lista_y_conexion(self):
         at = self.correr()
         for pagina in ("Lista de pedidos", "Conexión de datos"):
-            at.radio[0].set_value(pagina).run()
+            at.button(key=f"nav_{pagina}").click().run()
             self.assertFalse(at.exception, at.exception)
             self.assertFalse(at.error, [e.value for e in at.error])
 

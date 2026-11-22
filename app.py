@@ -7,8 +7,10 @@ con la sección [datos] en Secrets lee la base de datos real (ver README).
 
 from __future__ import annotations
 
+import base64
 import json
 from datetime import date
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -20,7 +22,6 @@ from trazabilidad.modelo import (DIAS_PRODUCCION_POR_DEFECTO, ETAPAS_POR_CLAVE, 
                                  atrasado, en_riesgo, etiqueta, indicadores)
 
 INTERNO = "Equipo Contex (todo)"
-PAGINAS = ("Tablero", "Lista de pedidos", "Conexión de datos")
 
 
 # --- Datos --------------------------------------------------------------------
@@ -48,11 +49,39 @@ def parametro(nombre: str) -> str:
     return valor if isinstance(valor, str) else ""
 
 
+MENU = {
+    "Tablero": ":material/view_kanban:",
+    "Lista de pedidos": ":material/format_list_bulleted:",
+    "Conexión de datos": ":material/database:",
+}
+LOGO = Path(__file__).parent / "assets" / "logo_contex.png"
+
+
+@st.cache_data
+def logo_base64() -> str:
+    return base64.b64encode(LOGO.read_bytes()).decode() if LOGO.exists() else ""
+
+
+def ir_a(pagina: str) -> None:
+    """on_click del menú: un clic, un rerun."""
+    st.session_state["pagina"] = pagina
+    st.query_params.pop("pedido", None)
+
+
+def iniciales(nombre: str) -> str:
+    palabras = [w for w in nombre.replace("(demo)", "").split() if w[:1].isalpha()]
+    return "".join(w[0] for w in palabras[:2]).upper() or "CX"
+
+
 def barra_lateral(clientes: list[str], fuente: str, es_demo: bool) -> tuple[str, str]:
     with st.sidebar:
-        st.markdown('<div class="marca">Contex<span>·</span>Trazabilidad</div>'
-                    '<div class="marca-sub">Seguimiento de pedidos ISO 9001</div>',
-                    unsafe_allow_html=True)
+        logo = logo_base64()
+        if logo:
+            st.markdown(f'<div class="logo-caja"><img src="data:image/png;base64,{logo}" alt="Contex FYG"></div>',
+                        unsafe_allow_html=True)
+        st.markdown('<div class="app-nombre"><b>Trazabilidad de pedidos</b>'
+                    '<span>Seguimiento ISO 9001</span></div>', unsafe_allow_html=True)
+
         opciones = [INTERNO] + clientes
         pedida = parametro("vista")
         indice = opciones.index(pedida) if pedida in opciones else 0
@@ -60,22 +89,42 @@ def barra_lateral(clientes: list[str], fuente: str, es_demo: bool) -> tuple[str,
                              help="Así ve el tablero cada cliente: solo sus pedidos.")
         if vista != pedida:
             st.query_params["vista"] = vista
-        paginas = PAGINAS if vista == INTERNO else PAGINAS[:2]
-        pagina = st.radio("Sección", paginas, label_visibility="collapsed")
-        st.divider()
-        st.caption(("🧪 " if es_demo else "🔌 ") + fuente)
-        if st.button("Actualizar datos", width="stretch"):
+        nombre = "Equipo Contex" if vista == INTERNO else vista.replace(" (demo)", "")
+        rol = "Vista interna · todos los pedidos" if vista == INTERNO else "Vista del cliente"
+        st.markdown(f'<div class="cuenta"><div class="avatar">{vistas.esc(iniciales(nombre))}</div>'
+                    f'<div><b>{vistas.esc(nombre)}</b><span>{rol}</span></div></div>',
+                    unsafe_allow_html=True)
+
+        paginas = list(MENU) if vista == INTERNO else list(MENU)[:2]
+        if st.session_state.get("pagina") not in paginas:
+            st.session_state["pagina"] = paginas[0]
+        actual = st.session_state["pagina"]
+        en_detalle = bool(parametro("pedido"))
+        st.markdown('<div class="rail-etiqueta">Menú</div>', unsafe_allow_html=True)
+        for nombre_pagina in paginas:
+            st.button(nombre_pagina, key=f"nav_{nombre_pagina}", icon=MENU[nombre_pagina],
+                      type="primary" if (nombre_pagina == actual and not en_detalle) else "secondary",
+                      on_click=ir_a, args=(nombre_pagina,), width="stretch")
+
+        clase = "punto" if es_demo else "punto real"
+        texto = "Datos de demostración" if es_demo else f"Conectado · {fuente}"
+        st.markdown(f'<div class="rail-pie"><span class="{clase}"></span>{vistas.esc(texto)}</div>',
+                    unsafe_allow_html=True)
+        if st.button("Actualizar datos", key="actualizar", icon=":material/refresh:", width="stretch"):
             cargar.clear()
             st.rerun()
-    return vista, pagina
+    return vista, actual
 
 
-def encabezado(titulo: str, subtitulo: str, fuente: str, es_demo: bool) -> None:
+def encabezado(titulo: str, subtitulo: str, fuente: str, es_demo: bool, ruta: str = "Seguimiento") -> None:
     clase = "fuente" if es_demo else "fuente real"
-    etiqueta_fuente = "DATOS DE DEMOSTRACIÓN" if es_demo else f"CONECTADO · {fuente}"
+    etiqueta_fuente = "Datos de demostración" if es_demo else f"Conectado · {fuente}"
+    hoy = date.today()
     st.markdown(
-        f'<div class="titulo"><div><h1>{vistas.esc(titulo)}</h1><p>{vistas.esc(subtitulo)}</p></div>'
-        f'<span class="{clase}">{vistas.esc(etiqueta_fuente)}</span></div>',
+        f'<div class="titulo"><div><div class="ruta">Contex FYG / <b>{vistas.esc(ruta)}</b></div>'
+        f'<h1>{vistas.esc(titulo)}</h1><p>{vistas.esc(subtitulo)}</p></div>'
+        f'<div class="titulo-der"><span class="hoy">Hoy · {vistas.fecha_corta(hoy)}</span>'
+        f'<span class="{clase}">{vistas.esc(etiqueta_fuente)}</span></div></div>',
         unsafe_allow_html=True,
     )
 
@@ -103,10 +152,10 @@ def pagina_detalle(p: Pedido, pedidos: list[Pedido], hoy: date, vista: str, dias
 
     izquierda, derecha = st.columns([3, 2], gap="large")
     with izquierda:
-        st.subheader("Registro de la trazabilidad")
+        st.markdown('<div class="seccion-t">Registro de la trazabilidad</div>', unsafe_allow_html=True)
         st.markdown(vistas.linea_de_tiempo(p), unsafe_allow_html=True)
     with derecha:
-        st.subheader("Productos")
+        st.markdown('<div class="seccion-t">Productos</div>', unsafe_allow_html=True)
         st.dataframe(pd.DataFrame([{"Producto": l.producto, "Cantidad": l.cantidad} for l in p.lineas]),
                      hide_index=True, width="stretch")
         if p.etapa in ("despacho", "entregado"):
@@ -141,7 +190,8 @@ def pagina_lista(pedidos: list[Pedido], hoy: date, vista: str, dias: int) -> Non
     if df.empty:
         st.info("No hay pedidos para mostrar.")
         return
-    etapas = st.multiselect("Etapa", sorted(df["Etapa"].unique()), placeholder="Todas las etapas")
+    etapas = st.pills("Etapa", list(dict.fromkeys(df["Etapa"])), selection_mode="multi",
+                      label_visibility="collapsed")
     if etapas:
         df = df[df["Etapa"].isin(etapas)]
     st.dataframe(
@@ -202,7 +252,8 @@ eventos = "SELECT codigo_pedido, fecha, etapa, clausula, descripcion, responsabl
 # --- Principal ----------------------------------------------------------------
 
 def main() -> None:
-    st.set_page_config(page_title="Contex · Trazabilidad", page_icon="🧵", layout="wide")
+    st.set_page_config(page_title="Contex FYG · Trazabilidad",
+                       page_icon=str(LOGO) if LOGO.exists() else "🧵", layout="wide")
     st.markdown(CSS, unsafe_allow_html=True)
 
     config = config_de_datos()
@@ -225,20 +276,22 @@ def main() -> None:
     codigo = parametro("pedido")
     elegido = next((p for p in visibles if p.codigo == codigo), None)
     if elegido is not None:
-        encabezado(f"Pedido {elegido.codigo}", "Trazabilidad completa, etapa por etapa", fuente, es_demo)
+        encabezado(f"Pedido {elegido.codigo}", "Trazabilidad completa, etapa por etapa", fuente, es_demo,
+                   ruta="Detalle del pedido")
         pagina_detalle(elegido, visibles, hoy, vista, dias)
         return
     if codigo:
         st.query_params.pop("pedido", None)
 
     if pagina == "Conexión de datos":
-        encabezado("Conexión de datos", "De dónde salen los pedidos del tablero", fuente, es_demo)
+        encabezado("Conexión de datos", "De dónde salen los pedidos del tablero", fuente, es_demo,
+                   ruta="Conexión de datos")
         pagina_conexion(config, fuente, es_demo, avisos)
         return
 
     subtitulo = ("Seguimiento de todos los pedidos en curso" if vista == INTERNO
                  else f"Así va su pedido, {vista.replace(' (demo)', '')}")
-    encabezado("Seguimiento de pedidos", subtitulo, fuente, es_demo)
+    encabezado("Seguimiento de pedidos", subtitulo, fuente, es_demo, ruta=pagina)
     if pagina == "Lista de pedidos":
         pagina_lista(visibles, hoy, vista, dias)
     else:

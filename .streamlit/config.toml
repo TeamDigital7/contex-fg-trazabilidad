@@ -1,10 +1,16 @@
 [theme]
 base = "light"
-primaryColor = "#C2601E"
-backgroundColor = "#F5F1EA"
-secondaryBackgroundColor = "#EDE7DC"
-textColor = "#2B2520"
+primaryColor = "#1F5FAF"
+backgroundColor = "#F3F5F9"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#14213D"
 font = "sans serif"
+borderColor = "#DFE5EE"
+
+[theme.sidebar]
+backgroundColor = "#0B2447"
+secondaryBackgroundColor = "#14305A"
+textColor = "#E8EEF7"
 
 [server]
 fileWatcherType = "none"
