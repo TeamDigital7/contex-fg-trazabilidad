@@ -15,7 +15,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from trazabilidad import reportes, vistas
+from trazabilidad import reportes, vistas, whatsapp
 from trazabilidad.conectores import COLUMNAS, ErrorDeDatos, obtener_conector, pedidos_desde_tablas
 from trazabilidad.estilos import CSS
 from trazabilidad.modelo import (DIAS_PRODUCCION_POR_DEFECTO, ETAPAS_POR_CLAVE, Pedido,
@@ -26,13 +26,17 @@ INTERNO = "Todos los clientes"
 
 # --- Datos --------------------------------------------------------------------
 
-def config_de_datos() -> dict:
-    """La sección [datos] de Secrets, o {} si no hay Secrets (demo)."""
+def seccion_de_secrets(nombre: str) -> dict:
+    """Una sección de Secrets como dict, o {} si no hay Secrets (el caso normal de la demo)."""
     try:
-        datos = st.secrets.get("datos", {})
-    except Exception:  # sin archivo de secrets: es el caso normal de la demo
+        datos = st.secrets.get(nombre, {})
+    except Exception:
         return {}
     return json.loads(json.dumps(datos, default=dict)) if datos else {}
+
+
+def config_de_datos() -> dict:
+    return seccion_de_secrets("datos")
 
 
 @st.cache_data(ttl=300, show_spinner="Leyendo pedidos…")
@@ -165,9 +169,88 @@ def boton_descargas(pedidos: list[Pedido], hoy: date, vista: str, es_demo: bool,
                            icon=":material/table_view:", key=f"descarga_xlsx_{clave}", width="stretch")
 
 
+def cliente_whatsapp() -> whatsapp.WhatsAppCloud | None:
+    try:
+        return whatsapp.WhatsAppCloud.desde_config(seccion_de_secrets("whatsapp"))
+    except whatsapp.ErrorWhatsApp:
+        return None
+
+
+@st.dialog("Enviar por WhatsApp", width="large")
+def dialogo_whatsapp(titulo: str, telefono_inicial: str, texto: str, variables: list[str],
+                     documentos: list[whatsapp.Documento], clave: str) -> None:
+    api = cliente_whatsapp()
+    st.markdown(f"**{titulo}**")
+    telefono_txt = st.text_input("Número de WhatsApp del cliente", value=telefono_inicial,
+                                 placeholder="987 654 321  o  +51 987 654 321",
+                                 icon=":material/call:", key=f"wsp_tel_{clave}")
+    telefono = whatsapp.normalizar_telefono(telefono_txt)
+    if telefono_txt and not telefono:
+        st.warning("Ese número no parece válido. Escribe el celular con 9 dígitos o con código de país.")
+
+    st.markdown('<div class="wsp-burbuja">' + vistas.esc(texto).replace("\n", "<br>")
+                .replace("*", "") + "</div>", unsafe_allow_html=True)
+    adjuntos = " ".join(f'<span class="wsp-adjunto">📎 {vistas.esc(d.nombre)}</span>' for d in documentos)
+    st.markdown(f'<div class="wsp-adjuntos">{adjuntos}</div>', unsafe_allow_html=True)
+
+    if api is not None:
+        if st.button("Enviar ahora", type="primary", icon=":material/send:", width="stretch",
+                     disabled=not telefono, key=f"wsp_enviar_{clave}"):
+            with st.spinner("Enviando por WhatsApp…"):
+                resultado = api.enviar_avance(telefono, texto, variables, documentos)
+            for paso in resultado.pasos:
+                {"ok": st.success, "aviso": st.warning, "error": st.error}[paso.estado](
+                    f"**{paso.nombre}:** {paso.detalle}")
+            if resultado.enviado:
+                st.session_state.setdefault("envios_wsp", []).append((titulo, telefono))
+    else:
+        st.info("**Modo demostración.** Todavía no está conectada la API de WhatsApp Business, así que "
+                "este botón abre WhatsApp con el mensaje ya escrito. Los archivos se adjuntan a mano "
+                "(están aquí abajo). Con la API conectada, el envío del mensaje, el PDF y el Excel "
+                "es automático con un clic.")
+        st.link_button("Abrir WhatsApp con el mensaje", whatsapp.enlace_wa_me(telefono, texto),
+                       type="primary", icon=":material/chat:", width="stretch")
+        columnas = st.columns(len(documentos))
+        for col, doc in zip(columnas, documentos):
+            with col:
+                st.download_button(doc.nombre, doc.contenido, file_name=doc.nombre, mime=doc.mime,
+                                   icon=":material/download:", width="stretch", key=f"wsp_doc_{clave}_{doc.nombre}")
+
+
+def abrir_whatsapp_de_pedido(p: Pedido, hoy: date, es_demo: bool, dias: int) -> None:
+    documentos = [
+        whatsapp.Documento(reportes.pdf_pedido(p, hoy, es_demo, dias), f"Pedido_{p.codigo}.pdf", whatsapp.MIME_PDF),
+        whatsapp.Documento(reportes.excel_resumen([p], hoy, nombre_corto(p.cliente), dias),
+                           f"Pedido_{p.codigo}.xlsx", whatsapp.MIME_XLSX),
+    ]
+    dialogo_whatsapp(f"{p.codigo} · {nombre_corto(p.cliente)}", p.telefono,
+                     whatsapp.mensaje_de_avance(p, hoy, dias),
+                     whatsapp.variables_de_plantilla(p, hoy, dias), documentos, p.codigo)
+
+
+def abrir_whatsapp_de_cliente(cliente: str, pedidos: list[Pedido], hoy: date, es_demo: bool, dias: int) -> None:
+    corto = nombre_corto(cliente)
+    archivo = corto.replace(" ", "_")
+    documentos = [
+        whatsapp.Documento(reportes.pdf_resumen(pedidos, hoy, corto, es_demo, dias),
+                           f"Resumen_{archivo}.pdf", whatsapp.MIME_PDF),
+        whatsapp.Documento(reportes.excel_resumen(pedidos, hoy, corto, dias),
+                           f"Pedidos_{archivo}.xlsx", whatsapp.MIME_XLSX),
+    ]
+    contacto = next((p.contacto for p in pedidos if p.contacto), corto)
+    telefono = next((p.telefono for p in pedidos if p.telefono), "")
+    activos = [p for p in pedidos if not p.entregado]
+    principal = min(activos or pedidos, key=lambda p: p.fecha_entrega)
+    variables = whatsapp.variables_de_plantilla(principal, hoy, dias)
+    dialogo_whatsapp(f"Resumen de {corto} · {len(pedidos)} pedido(s)", telefono,
+                     whatsapp.mensaje_de_resumen(contacto, pedidos, hoy, dias), variables, documentos,
+                     f"cliente_{archivo}")
+
+
 def pagina_tablero(pedidos: list[Pedido], hoy: date, vista: str, dias: int, es_demo: bool) -> None:
     with st.container(key="herramientas"):
-        busqueda_col, periodo_col, descarga_col = st.columns([5, 3, 1.4], gap="small")
+        anchos = [5, 3, 1.4] if vista == INTERNO else [4.2, 3, 1.4, 1.6]
+        busqueda_col, periodo_col, descarga_col, *wsp_col = st.columns(anchos, gap="small")
         with busqueda_col:
             busqueda = st.text_input("Buscar", placeholder="Buscar por código, cliente o producto…",
                                      label_visibility="collapsed", icon=":material/search:")
@@ -182,6 +265,11 @@ def pagina_tablero(pedidos: list[Pedido], hoy: date, vista: str, dias: int, es_d
                    if b in p.codigo.lower() or b in p.cliente.lower() or b in p.productos.lower()]
     with descarga_col:
         boton_descargas(pedidos, hoy, vista, es_demo, dias, "tablero")
+    if wsp_col and pedidos:
+        with wsp_col[0]:
+            if st.button("WhatsApp", icon=":material/chat:", key="wsp_cliente", width="stretch",
+                         help="Enviar al cliente el resumen de sus pedidos con el PDF y el Excel"):
+                abrir_whatsapp_de_cliente(vista, pedidos, hoy, es_demo, dias)
     st.markdown(vistas.fila_indicadores(indicadores(pedidos, hoy, dias)), unsafe_allow_html=True)
     st.markdown(vistas.tablero(pedidos, hoy, vista, parametro("pedido"), dias, dias_entregado),
                 unsafe_allow_html=True)
@@ -189,10 +277,13 @@ def pagina_tablero(pedidos: list[Pedido], hoy: date, vista: str, dias: int, es_d
 
 
 def pagina_detalle(p: Pedido, pedidos: list[Pedido], hoy: date, vista: str, dias: int, es_demo: bool) -> None:
-    volver, descarga = st.columns([4, 1.4])
+    volver, wsp, descarga = st.columns([3.2, 1.6, 1.4])
     with volver:
         st.markdown(f'<div class="volver"><a href="{vistas.enlace(vista=vista)}" target="_self">'
                     '← Volver al tablero</a></div>', unsafe_allow_html=True)
+    with wsp:
+        if st.button("Enviar por WhatsApp", icon=":material/chat:", key="wsp_pedido", width="stretch"):
+            abrir_whatsapp_de_pedido(p, hoy, es_demo, dias)
     with descarga:
         st.download_button("Proforma PDF" if p.con_precios else "Ficha en PDF",
                            reportes.pdf_pedido(p, hoy, es_demo, dias),

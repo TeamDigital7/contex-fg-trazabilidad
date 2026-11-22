@@ -103,6 +103,8 @@ class Pedido:
     liberado: bool = False
     encuesta: float | None = None
     fecha_entregado: date | None = None
+    telefono: str = ""   # WhatsApp del contacto del cliente (opcional)
+    contacto: str = ""   # a quién se le escribe ("Ing. Pérez"); vacío = el cliente
     eventos: list[Evento] = field(default_factory=list)
 
     @property

@@ -39,6 +39,35 @@ así que lo que el cliente ve en la demo es exactamente lo que verá con sus dat
 Agregar el driver de su base en `requirements.txt` (psycopg2-binary, pymysql,
 pyodbc u oracledb).
 
+## WhatsApp: el avance al cliente con un clic
+
+Botón **"Enviar por WhatsApp"** en el detalle de cada pedido (mensaje + PDF + Excel
+del pedido) y en el tablero cuando se elige un cliente (resumen de todos sus pedidos).
+El número sale de la columna opcional `telefono` de la tabla `pedidos` (y el saludo
+de `contacto`); si no viene, se escribe en la ventana antes de enviar.
+
+- **Sin configurar (demo):** abre WhatsApp con el mensaje ya escrito; los archivos se
+  adjuntan a mano. Un enlace no puede adjuntar archivos: eso solo lo hace la API.
+- **Con la API de WhatsApp Business (Meta Cloud API):** el envío es automático.
+  Pasos, una sola vez:
+  1. Cuenta de Meta Business verificada y un número de WhatsApp para la empresa
+     (no puede estar usándose en la app normal de WhatsApp).
+  2. En Meta, crear la plantilla `avance_pedido` (categoría *Utilidad*, idioma
+     español, cabecera **Documento**) con este texto:
+
+     > Hola {{1}}, le saluda Contex FYG. Le compartimos el avance de su pedido {{2}}:
+     > se encuentra en la etapa {{3}} con un avance de {{4}}. Entrega comprometida: {{5}}.
+     > {{6}} Adjuntamos el detalle en PDF. Quedamos atentos a cualquier consulta.
+
+  3. Poner `token` y `phone_number_id` en la sección `[whatsapp]` de Secrets
+     (ver `.streamlit/secrets.example.toml`).
+
+  WhatsApp exige que el primer mensaje de la empresa sea una plantilla aprobada, y
+  una plantilla lleva **un** documento: el PDF va en la plantilla y el Excel después,
+  como archivo aparte. Ese segundo archivo solo llega si el cliente escribió en las
+  últimas 24 h; si no, la app lo avisa (el mensaje y el PDF sí llegan).
+  Meta cobra por conversación iniciada por la empresa.
+
 ## Correr y desplegar
 
 ```bash

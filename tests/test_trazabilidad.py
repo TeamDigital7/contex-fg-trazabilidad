@@ -130,6 +130,96 @@ class Reportes(unittest.TestCase):
         self.assertGreater(len(todo), len(corto))
 
 
+class FalsoMeta:
+    """Imita la Cloud API: guarda cada petición y responde como Meta."""
+
+    def __init__(self, fallar_documentos_con=None):
+        self.peticiones = []
+        self.fallar_documentos_con = fallar_documentos_con
+
+    def __call__(self, req, timeout=None):
+        import io, json, urllib.error
+        cuerpo = req.data or b""
+        self.peticiones.append((req.full_url, req.get_header("Content-type"), cuerpo,
+                                req.get_header("Authorization")))
+        if req.full_url.endswith("/media"):
+            respuesta = {"id": f"media-{len(self.peticiones)}"}
+        else:
+            datos = json.loads(cuerpo)
+            if datos["type"] == "document" and self.fallar_documentos_con:
+                error = json.dumps({"error": {"code": self.fallar_documentos_con, "message": "Re-engagement"}})
+                raise urllib.error.HTTPError(req.full_url, 400, "Bad", {}, io.BytesIO(error.encode()))
+            respuesta = {"messages": [{"id": "wamid.1"}]}
+
+        class R(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+        return R(json.dumps(respuesta).encode())
+
+
+class WhatsApp(unittest.TestCase):
+    def setUp(self):
+        from trazabilidad import whatsapp
+        self.w = whatsapp
+        self.pedidos, _ = pedidos_desde_tablas(ConectorDemo(HOY).leer_tablas())
+        self.p = next(x for x in self.pedidos if x.codigo == "PED-2026-0012")
+        self.docs = [whatsapp.Documento(b"%PDF-1", "Pedido.pdf", whatsapp.MIME_PDF),
+                     whatsapp.Documento(b"PK", "Pedido.xlsx", whatsapp.MIME_XLSX)]
+
+    def test_telefono(self):
+        self.assertEqual(self.w.normalizar_telefono("987 654 321"), "51987654321")
+        self.assertEqual(self.w.normalizar_telefono("+51 987-654-321"), "51987654321")
+        self.assertEqual(self.w.normalizar_telefono("0051987654321"), "51987654321")
+        self.assertEqual(self.w.normalizar_telefono("123"), "")
+
+    def test_speech_y_variables(self):
+        texto = self.w.mensaje_de_avance(self.p, HOY)
+        self.assertIn("PED-2026-0012", texto)
+        self.assertIn("Arq. Martín Vega", texto)  # le habla al contacto, no a la razón social
+        self.assertIn("reproceso", texto)
+        variables = self.w.variables_de_plantilla(self.p, HOY)
+        self.assertEqual(len(variables), 6)
+        self.assertFalse(any("\n" in v or "    " in v for v in variables))
+
+    def test_enlace_wa_me_lleva_el_texto(self):
+        enlace = self.w.enlace_wa_me("51987654321", "Hola\nmundo")
+        self.assertTrue(enlace.startswith("https://wa.me/51987654321?text=Hola%0Amundo"))
+
+    def test_envio_con_plantilla_pdf_y_excel(self):
+        meta = FalsoMeta()
+        api = self.w.WhatsAppCloud("TOKEN", "999", abrir=meta)
+        res = api.enviar_avance("51987654321", "texto", ["a"] * 6, self.docs)
+        self.assertTrue(res.enviado)
+        self.assertEqual([p.estado for p in res.pasos], ["ok", "ok"])
+        urls = [u.rsplit("/", 1)[1] for u, *_ in meta.peticiones]
+        self.assertEqual(urls, ["media", "messages", "media", "messages"])
+        import json
+        plantilla = json.loads(meta.peticiones[1][2])
+        self.assertEqual(plantilla["type"], "template")
+        self.assertEqual(plantilla["template"]["components"][0]["parameters"][0]["document"]["filename"], "Pedido.pdf")
+        self.assertIn(b"multipart", meta.peticiones[0][1].encode())
+        self.assertEqual(meta.peticiones[0][3], "Bearer TOKEN")
+
+    def test_excel_fuera_de_ventana_es_aviso_no_fallo(self):
+        api = self.w.WhatsAppCloud("T", "999", abrir=FalsoMeta(fallar_documentos_con=131047))
+        res = api.enviar_avance("51987654321", "texto", ["a"] * 6, self.docs)
+        self.assertTrue(res.enviado)
+        self.assertEqual(res.pasos[-1].estado, "aviso")
+        self.assertIn("24 h", res.pasos[-1].detalle)
+
+    def test_sin_numero_no_envia(self):
+        meta = FalsoMeta()
+        res = self.w.WhatsAppCloud("T", "999", abrir=meta).enviar_avance("", "x", [], self.docs)
+        self.assertFalse(res.enviado)
+        self.assertEqual(meta.peticiones, [])
+
+    def test_sin_secrets_no_hay_api(self):
+        self.assertIsNone(self.w.WhatsAppCloud.desde_config({}))
+
+
 class ConectorSQLReal(unittest.TestCase):
     """El conector SQL se prueba contra un SQLite de verdad con las tablas de la demo."""
 
@@ -216,6 +306,16 @@ class App(unittest.TestCase):
         self.assertIn("ISO 9.1.2 · historial", self.html(at))
         at = self.correr(pedido="PED-2026-0012")
         self.assertTrue(any(b.key == "descarga_proforma" for b in at.get("download_button")))
+
+    def test_boton_whatsapp_abre_el_dialogo_demo(self):
+        at = self.correr(pedido="PED-2026-0012")
+        at.button(key="wsp_pedido").click().run()
+        self.assertFalse(at.exception, at.exception)
+        self.assertFalse(at.error, [e.value for e in at.error])
+        self.assertIn("wa.me", " ".join(str(b.proto) for b in at.get("link_button")))
+        at = self.correr(vista="Minera Los Andes S.A.C. (demo)")
+        at.button(key="wsp_cliente").click().run()
+        self.assertFalse(at.exception, at.exception)
 
     def test_lista_y_conexion(self):
         at = self.correr()

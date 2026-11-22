@@ -21,7 +21,7 @@ COLUMNAS = {
     "pedidos": {
         "obligatorias": ["codigo", "cliente", "etapa", "fecha_pedido", "fecha_entrega"],
         "opcionales": ["avance_produccion", "no_conformes", "cantidad_despachada",
-                       "liberado", "encuesta", "fecha_entregado"],
+                       "liberado", "encuesta", "fecha_entregado", "telefono", "contacto"],
     },
     "lineas": {
         "obligatorias": ["codigo_pedido", "producto", "cantidad"],
@@ -184,6 +184,8 @@ def pedidos_desde_tablas(tablas: Tablas) -> tuple[list[Pedido], list[str]]:
             liberado=_si(fila.get("liberado")),
             encuesta=None if _texto(encuesta) == "" else _num(encuesta, None),
             fecha_entregado=_fecha(fila.get("fecha_entregado")),
+            telefono=_texto(fila.get("telefono")),
+            contacto=_texto(fila.get("contacto")),
             eventos=sorted(eventos_por_pedido.get(codigo, []), key=lambda e: e.fecha),
         ))
         if not pedidos[-1].lineas:

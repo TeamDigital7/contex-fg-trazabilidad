@@ -25,6 +25,11 @@ CLIENTES = [
     "Agroindustrias Valle Verde S.A. (demo)",
 ]
 
+# Contacto de cada cliente. Sin teléfono A PROPÓSITO: un número inventado puede
+# ser de una persona real. En la demo el número se escribe en la pantalla.
+CONTACTOS = ["Ing. Rosa Quispe", "Arq. Martín Vega", "Lic. Carmen Ríos", "Ing. Pedro Salazar",
+             "Sra. Lucía Paredes", "Sr. Diego Flores", "Ing. Valeria Huamán"]
+
 # (código, cliente, productos [(producto, cantidad)], etapa, días desde hoy a la entrega, extra)
 PEDIDOS = [
     ("PED-2026-0005", 0, [("Casaca térmica con reflectivo", 120)], "entregado", -38, {"encuesta": 4.6}),
@@ -97,6 +102,8 @@ def generar_tablas(hoy: date | None = None) -> Tablas:
             "liberado": etapa in ("despacho", "entregado"),
             "encuesta": extra.get("encuesta"),
             "fecha_entregado": entregado_el,
+            "telefono": "",
+            "contacto": CONTACTOS[i_cliente],
         })
         for producto, cantidad in productos:
             filas_lineas.append({"codigo_pedido": codigo, "producto": producto, "cantidad": cantidad,

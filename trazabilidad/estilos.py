@@ -143,6 +143,17 @@ a.tarjeta, a.tarjeta:hover, a.tarjeta:visited { text-decoration:none; color:inhe
 .volver { margin-bottom:.6rem; }
 .volver a { color:var(--accion); text-decoration:none; font-weight:600; font-size:.85rem; }
 
+/* --- WhatsApp ----------------------------------------------------------------- */
+div.st-key-wsp_pedido button, div.st-key-wsp_cliente button {
+  background:#1FA855; border:1px solid #1FA855; border-radius:10px; }
+div.st-key-wsp_pedido button *, div.st-key-wsp_cliente button * { color:#fff !important; font-weight:600; }
+div.st-key-wsp_pedido button:hover, div.st-key-wsp_cliente button:hover { background:#178A45; border-color:#178A45; }
+.wsp-burbuja { background:#DCF8C6; border-radius:14px 14px 4px 14px; padding:.85rem 1rem; font-size:.88rem;
+               line-height:1.5; color:#111B21; box-shadow:0 1px 1px rgba(0,0,0,.08); margin:.4rem 0 .6rem;
+               max-height:320px; overflow:auto; }
+.wsp-adjuntos { display:flex; flex-wrap:wrap; gap:.4rem; margin-bottom:.8rem; }
+.wsp-adjunto { background:var(--gris-bg); color:var(--gris); border-radius:8px; padding:.3rem .6rem; font-size:.78rem; }
+
 /* --- Barra lateral: rail azul marino, como el Control Center ---------------- */
 [data-testid="stSidebar"] { background: linear-gradient(180deg, var(--marino-900) 0%, #0A1F3D 100%); border-right:none; }
 [data-testid="stSidebarHeader"] { height:2.2rem; min-height:0; padding:.4rem .6rem 0; }
