@@ -15,13 +15,13 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from trazabilidad import vistas
+from trazabilidad import reportes, vistas
 from trazabilidad.conectores import COLUMNAS, ErrorDeDatos, obtener_conector, pedidos_desde_tablas
 from trazabilidad.estilos import CSS
 from trazabilidad.modelo import (DIAS_PRODUCCION_POR_DEFECTO, ETAPAS_POR_CLAVE, Pedido,
                                  atrasado, en_riesgo, etiqueta, indicadores)
 
-INTERNO = "Equipo Contex (todo)"
+INTERNO = "Todos los clientes"
 
 
 # --- Datos --------------------------------------------------------------------
@@ -68,12 +68,23 @@ def ir_a(pagina: str) -> None:
     st.query_params.pop("pedido", None)
 
 
+SUFIJOS = ("S.A.C.", "S.A.A.", "S.A.", "E.I.R.L.", "S.R.L.", "(demo)")
+
+
+def nombre_corto(cliente: str) -> str:
+    """"Agroindustrias Valle Verde S.A. (demo)" -> "Agroindustrias Valle Verde": cabe en el menú."""
+    nombre = cliente
+    for sufijo in SUFIJOS:
+        nombre = nombre.replace(sufijo, "")
+    return " ".join(nombre.split()) or cliente
+
+
 def iniciales(nombre: str) -> str:
     palabras = [w for w in nombre.replace("(demo)", "").split() if w[:1].isalpha()]
     return "".join(w[0] for w in palabras[:2]).upper() or "CX"
 
 
-def barra_lateral(clientes: list[str], fuente: str, es_demo: bool) -> tuple[str, str]:
+def barra_lateral(clientes: dict[str, int], fuente: str, es_demo: bool) -> tuple[str, str]:
     with st.sidebar:
         logo = logo_base64()
         if logo:
@@ -82,15 +93,22 @@ def barra_lateral(clientes: list[str], fuente: str, es_demo: bool) -> tuple[str,
         st.markdown('<div class="app-nombre"><b>Trazabilidad de pedidos</b>'
                     '<span>Seguimiento ISO 9001</span></div>', unsafe_allow_html=True)
 
-        opciones = [INTERNO] + clientes
+        total = sum(clientes.values())
+        opciones = [INTERNO] + sorted(clientes)
         pedida = parametro("vista")
         indice = opciones.index(pedida) if pedida in opciones else 0
-        vista = st.selectbox("Ver como", opciones, index=indice,
-                             help="Así ve el tablero cada cliente: solo sus pedidos.")
+
+        def etiqueta_cliente(op: str) -> str:
+            return op if op == INTERNO else nombre_corto(op)
+
+        vista = st.selectbox("Cliente", opciones, index=indice, format_func=etiqueta_cliente,
+                             help="Cada cliente ve solo sus pedidos. «Todos los clientes» muestra todos.")
         if vista != pedida:
             st.query_params["vista"] = vista
-        nombre = "Equipo Contex" if vista == INTERNO else vista.replace(" (demo)", "")
-        rol = "Vista interna · todos los pedidos" if vista == INTERNO else "Vista del cliente"
+        n = total if vista == INTERNO else clientes[vista]
+        nombre = "Equipo Contex" if vista == INTERNO else nombre_corto(vista)
+        rol = (f"Vista interna · {n} pedidos" if vista == INTERNO
+               else f"Vista del cliente · {n} pedido{'s' if n != 1 else ''}")
         st.markdown(f'<div class="cuenta"><div class="avatar">{vistas.esc(iniciales(nombre))}</div>'
                     f'<div><b>{vistas.esc(nombre)}</b><span>{rol}</span></div></div>',
                     unsafe_allow_html=True)
@@ -131,21 +149,56 @@ def encabezado(titulo: str, subtitulo: str, fuente: str, es_demo: bool, ruta: st
 
 # --- Páginas ------------------------------------------------------------------
 
-def pagina_tablero(pedidos: list[Pedido], hoy: date, vista: str, dias: int) -> None:
-    busqueda = st.text_input("Buscar", placeholder="Código, cliente o producto…",
-                             label_visibility="collapsed")
+def boton_descargas(pedidos: list[Pedido], hoy: date, vista: str, es_demo: bool, dias: int, clave: str) -> None:
+    """Un solo botón "Descargar" con el resumen en PDF y el Excel adentro."""
+    alcance = "Todos los clientes" if vista == INTERNO else nombre_corto(vista)
+    sello = f"{hoy:%Y%m%d}"
+    archivo = "todos" if vista == INTERNO else nombre_corto(vista).lower().replace(" ", "_")
+    with st.popover("Descargar", icon=":material/download:", width="stretch"):
+        st.caption(f"{len(pedidos)} pedidos · {alcance}")
+        st.download_button("Resumen en PDF", reportes.pdf_resumen(pedidos, hoy, alcance, es_demo, dias),
+                           file_name=f"resumen_pedidos_{archivo}_{sello}.pdf", mime="application/pdf",
+                           icon=":material/picture_as_pdf:", key=f"descarga_pdf_{clave}", width="stretch")
+        st.download_button("Excel con detalle", reportes.excel_resumen(pedidos, hoy, alcance, dias),
+                           file_name=f"pedidos_{archivo}_{sello}.xlsx",
+                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                           icon=":material/table_view:", key=f"descarga_xlsx_{clave}", width="stretch")
+
+
+def pagina_tablero(pedidos: list[Pedido], hoy: date, vista: str, dias: int, es_demo: bool) -> None:
+    with st.container(key="herramientas"):
+        busqueda_col, periodo_col, descarga_col = st.columns([5, 3, 1.4], gap="small")
+        with busqueda_col:
+            busqueda = st.text_input("Buscar", placeholder="Buscar por código, cliente o producto…",
+                                     label_visibility="collapsed", icon=":material/search:")
+        with periodo_col:
+            periodo = st.segmented_control("Entregados", ["Últimos 30 días", "Todo el historial"],
+                                           default="Últimos 30 días", label_visibility="collapsed",
+                                           width="stretch")
+        dias_entregado = None if periodo == "Todo el historial" else 30
     if busqueda:
         b = busqueda.strip().lower()
         pedidos = [p for p in pedidos
                    if b in p.codigo.lower() or b in p.cliente.lower() or b in p.productos.lower()]
+    with descarga_col:
+        boton_descargas(pedidos, hoy, vista, es_demo, dias, "tablero")
     st.markdown(vistas.fila_indicadores(indicadores(pedidos, hoy, dias)), unsafe_allow_html=True)
-    st.markdown(vistas.tablero(pedidos, hoy, vista, parametro("pedido"), dias), unsafe_allow_html=True)
-    st.caption("Toca una tarjeta para ver el detalle y el registro de cada etapa.")
+    st.markdown(vistas.tablero(pedidos, hoy, vista, parametro("pedido"), dias, dias_entregado),
+                unsafe_allow_html=True)
+    st.caption("Toca una tarjeta para ver el detalle, el registro de cada etapa y su proforma.")
 
 
-def pagina_detalle(p: Pedido, pedidos: list[Pedido], hoy: date, vista: str, dias: int) -> None:
-    st.markdown(f'<div class="volver"><a href="{vistas.enlace(vista=vista)}" target="_self">'
-                '← Volver al tablero</a></div>', unsafe_allow_html=True)
+def pagina_detalle(p: Pedido, pedidos: list[Pedido], hoy: date, vista: str, dias: int, es_demo: bool) -> None:
+    volver, descarga = st.columns([4, 1.4])
+    with volver:
+        st.markdown(f'<div class="volver"><a href="{vistas.enlace(vista=vista)}" target="_self">'
+                    '← Volver al tablero</a></div>', unsafe_allow_html=True)
+    with descarga:
+        st.download_button("Proforma PDF" if p.con_precios else "Ficha en PDF",
+                           reportes.pdf_pedido(p, hoy, es_demo, dias),
+                           file_name=f"proforma_{p.codigo}.pdf", mime="application/pdf",
+                           icon=":material/picture_as_pdf:", type="primary", key="descarga_proforma",
+                           width="stretch")
     st.markdown(vistas.cabecera_pedido(p, hoy, dias), unsafe_allow_html=True)
     st.markdown(vistas.stepper(p), unsafe_allow_html=True)
     st.markdown(vistas.subetapas(p), unsafe_allow_html=True)
@@ -156,8 +209,13 @@ def pagina_detalle(p: Pedido, pedidos: list[Pedido], hoy: date, vista: str, dias
         st.markdown(vistas.linea_de_tiempo(p), unsafe_allow_html=True)
     with derecha:
         st.markdown('<div class="seccion-t">Productos</div>', unsafe_allow_html=True)
-        st.dataframe(pd.DataFrame([{"Producto": l.producto, "Cantidad": l.cantidad} for l in p.lineas]),
-                     hide_index=True, width="stretch")
+        filas = [{"Producto": l.producto, "Cantidad": l.cantidad, "Precio unit.": l.precio_unitario,
+                  "Importe": l.importe} for l in p.lineas]
+        st.dataframe(pd.DataFrame(filas), hide_index=True, width="stretch",
+                     column_config={"Precio unit.": st.column_config.NumberColumn(format="S/ %.2f"),
+                                    "Importe": st.column_config.NumberColumn(format="S/ %.2f")})
+        if p.con_precios:
+            st.metric("Total con IGV", f"S/ {p.subtotal * (1 + reportes.IGV):,.2f}")
         if p.etapa in ("despacho", "entregado"):
             st.metric("Prendas entregadas", f"{p.cantidad_despachada} / {p.cantidad_total}")
         if p.no_conformes:
@@ -185,8 +243,9 @@ def tabla_de_pedidos(pedidos: list[Pedido], hoy: date, dias: int) -> pd.DataFram
     return pd.DataFrame(filas)
 
 
-def pagina_lista(pedidos: list[Pedido], hoy: date, vista: str, dias: int) -> None:
+def pagina_lista(pedidos: list[Pedido], hoy: date, vista: str, dias: int, es_demo: bool) -> None:
     df = tabla_de_pedidos(pedidos, hoy, dias)
+    st.caption("Aquí están **todos** los pedidos, también los entregados hace más de 30 días.")
     if df.empty:
         st.info("No hay pedidos para mostrar.")
         return
@@ -203,8 +262,10 @@ def pagina_lista(pedidos: list[Pedido], hoy: date, vista: str, dias: int) -> Non
             "Entregado": st.column_config.DateColumn(format="DD/MM/YYYY"),
         },
     )
-    st.download_button("Descargar CSV", df.to_csv(index=False).encode("utf-8-sig"),
-                       file_name=f"pedidos_{hoy:%Y%m%d}.csv", mime="text/csv")
+    elegidos = [p for p in pedidos if p.codigo in set(df["Código"])]
+    _, descarga = st.columns([4, 1.4])
+    with descarga:
+        boton_descargas(elegidos, hoy, vista, es_demo, dias, "lista")
     codigos = df["Código"].tolist()
     elegido = st.selectbox("Abrir el detalle de", codigos, index=None, placeholder="Elige un pedido…")
     if elegido:
@@ -269,7 +330,9 @@ def main() -> None:
         return
 
     hoy = date.today()
-    clientes = sorted({p.cliente for p in pedidos})
+    clientes: dict[str, int] = {}
+    for p in pedidos:
+        clientes[p.cliente] = clientes.get(p.cliente, 0) + 1
     vista, pagina = barra_lateral(clientes, fuente, es_demo)
     visibles = pedidos if vista == INTERNO else [p for p in pedidos if p.cliente == vista]
 
@@ -278,7 +341,7 @@ def main() -> None:
     if elegido is not None:
         encabezado(f"Pedido {elegido.codigo}", "Trazabilidad completa, etapa por etapa", fuente, es_demo,
                    ruta="Detalle del pedido")
-        pagina_detalle(elegido, visibles, hoy, vista, dias)
+        pagina_detalle(elegido, visibles, hoy, vista, dias, es_demo)
         return
     if codigo:
         st.query_params.pop("pedido", None)
@@ -290,12 +353,12 @@ def main() -> None:
         return
 
     subtitulo = ("Seguimiento de todos los pedidos en curso" if vista == INTERNO
-                 else f"Así va su pedido, {vista.replace(' (demo)', '')}")
+                 else f"Así van los pedidos de {nombre_corto(vista)}")
     encabezado("Seguimiento de pedidos", subtitulo, fuente, es_demo, ruta=pagina)
     if pagina == "Lista de pedidos":
-        pagina_lista(visibles, hoy, vista, dias)
+        pagina_lista(visibles, hoy, vista, dias, es_demo)
     else:
-        pagina_tablero(visibles, hoy, vista, dias)
+        pagina_tablero(visibles, hoy, vista, dias, es_demo)
 
 
 if __name__ == "__main__":

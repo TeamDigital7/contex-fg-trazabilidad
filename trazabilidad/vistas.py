@@ -48,25 +48,34 @@ def tarjeta(p: Pedido, hoy: date, vista: str, seleccionado: str = "", dias_produ
     )
 
 
+def referencia_columna(clave: str, referencia: str, dias_entregado: int | None) -> str:
+    if clave != "entregado":
+        return referencia
+    return f"{referencia} · {dias_entregado} días" if dias_entregado else f"{referencia} · historial"
+
+
 def tablero(pedidos: list[Pedido], hoy: date, vista: str, seleccionado: str = "",
-            dias_produccion: int = 15) -> str:
-    grupos = por_etapa(pedidos, hoy)
-    columnas = []
+            dias_produccion: int = 15, dias_entregado: int | None = 30) -> str:
+    grupos = por_etapa(pedidos, hoy, dias_entregado)
+    columnas, accesos = [], []
     for etapa in ETAPAS:
         lista = grupos[etapa.clave]
         cuerpo = "".join(tarjeta(p, hoy, vista, seleccionado, dias_produccion) for p in lista)
         if not cuerpo:
             cuerpo = '<div class="vacio">Sin pedidos en esta etapa</div>'
+        accesos.append(f'<a href="#col-{etapa.clave}">{esc(etapa.nombre)} <b>{len(lista)}</b></a>')
         columnas.append(
-            f'<section class="columna">'
+            f'<section class="columna" id="col-{etapa.clave}">'
             f'<header><h3>{esc(etapa.nombre)}</h3><span class="conteo">{len(lista)}</span></header>'
-            f'<div class="norma" title="{esc(etapa.descripcion)}">{esc(etapa.referencia)}</div>'
+            f'<div class="norma" title="{esc(etapa.descripcion)}">'
+            f'{esc(referencia_columna(etapa.clave, etapa.referencia, dias_entregado))}</div>'
             f'<div class="tarjetas">{cuerpo}</div>'
             f'</section>'
         )
     return (
         '<div class="tablero-cab"><b>Pedidos por etapa</b>'
         '<span>Cada etapa deja su registro ISO automáticamente</span></div>'
+        f'<nav class="etapas-nav">{"".join(accesos)}</nav>'
         f'<div class="tablero">{"".join(columnas)}</div>'
     )
 
@@ -98,8 +107,10 @@ def fila_indicadores(ind: dict) -> str:
                   "alerta" if ind["en_riesgo"] else "bien", "alerta"),
         indicador("No conformes abiertos", str(ind["no_conformes"]), "ISO 8.7",
                   "aviso" if ind["no_conformes"] else "bien", "escudo"),
-        indicador("Entregas a tiempo", a_tiempo, f"{ind['entregados']} entregados", icono="reloj"),
-        indicador("Satisfacción", satis, "Encuesta ISO 9.1.2", icono="estrella"),
+        indicador("Entregas a tiempo", a_tiempo,
+                  f"{ind['entregados']} entregados" if ind["entregados"] else "aún sin entregas", icono="reloj"),
+        indicador("Satisfacción", satis,
+                  "Encuesta ISO 9.1.2" if ind["satisfaccion"] is not None else "aún sin encuestas", icono="estrella"),
     ]) + "</div>"
 
 

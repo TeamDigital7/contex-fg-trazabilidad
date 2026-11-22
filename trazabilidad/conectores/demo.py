@@ -44,6 +44,19 @@ PEDIDOS = [
     ("PED-2026-0019", 5, [("Polo piqué azul con bordado", 180)], "recibido", 21, {}),
 ]
 
+# Precio unitario de demostración (S/ sin IGV), para que la descarga sea una proforma.
+PRECIOS = {
+    "Casaca térmica con reflectivo": 128.0,
+    "Overol drill gris con cinta reflectiva": 96.0,
+    "Polo piqué blanco con logo": 32.5,
+    "Polo piqué azul con bordado": 36.0,
+    "Pantalón drill azul marino": 58.0,
+    "Chaleco drill naranja": 42.0,
+    "Pantalón jean 14 oz industrial": 69.9,
+    "Camisa drill beige manga larga": 54.0,
+    "Camisa oxford celeste manga larga": 61.0,
+}
+
 RESPONSABLES = {
     "recibido": "Ana Torres · Comercial",
     "produccion": "Luis Ramos · Jefe de planta",
@@ -86,7 +99,8 @@ def generar_tablas(hoy: date | None = None) -> Tablas:
             "fecha_entregado": entregado_el,
         })
         for producto, cantidad in productos:
-            filas_lineas.append({"codigo_pedido": codigo, "producto": producto, "cantidad": cantidad})
+            filas_lineas.append({"codigo_pedido": codigo, "producto": producto, "cantidad": cantidad,
+                                 "precio_unitario": PRECIOS.get(producto)})
 
         filas_eventos.extend(_eventos(codigo, etapa, pedido, hoy, avance, total, extra, entregado_el))
 

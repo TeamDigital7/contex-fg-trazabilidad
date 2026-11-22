@@ -27,7 +27,7 @@ ETAPAS: tuple[Etapa, ...] = (
           "Liberación del producto y control de salidas no conformes."),
     Etapa("despacho", "Despacho", "Guía · factura",
           "Emisión de guía de remisión, factura y entregas parciales."),
-    Etapa("entregado", "Entregado · 30 días", "ISO 9.1.2",
+    Etapa("entregado", "Entregado", "ISO 9.1.2",
           "Pedido entregado y encuesta de satisfacción del cliente."),
 )
 
@@ -72,6 +72,11 @@ def normalizar_etapa(valor: object) -> str:
 class Linea:
     producto: str
     cantidad: int
+    precio_unitario: float | None = None  # opcional: con precio, la descarga es una proforma
+
+    @property
+    def importe(self) -> float | None:
+        return None if self.precio_unitario is None else self.precio_unitario * self.cantidad
 
 
 @dataclass
@@ -103,6 +108,14 @@ class Pedido:
     @property
     def cantidad_total(self) -> int:
         return sum(l.cantidad for l in self.lineas)
+
+    @property
+    def con_precios(self) -> bool:
+        return bool(self.lineas) and all(l.precio_unitario is not None for l in self.lineas)
+
+    @property
+    def subtotal(self) -> float:
+        return sum(l.importe or 0 for l in self.lineas)
 
     @property
     def productos(self) -> str:
@@ -190,18 +203,20 @@ def avance_general(pedido: Pedido) -> float:
     return min(base, 1.0)
 
 
-def visible_en_tablero(pedido: Pedido, hoy: date) -> bool:
-    if not pedido.entregado:
+def visible_en_tablero(pedido: Pedido, hoy: date, dias_entregado: int | None = DIAS_ENTREGADO_VISIBLE) -> bool:
+    """`dias_entregado=None` muestra también los entregados antiguos (el historial completo)."""
+    if not pedido.entregado or dias_entregado is None:
         return True
     cuando = pedido.fecha_entregado or pedido.fecha_entrega
-    return (hoy - cuando).days <= DIAS_ENTREGADO_VISIBLE
+    return (hoy - cuando).days <= dias_entregado
 
 
-def por_etapa(pedidos: list[Pedido], hoy: date) -> dict[str, list[Pedido]]:
+def por_etapa(pedidos: list[Pedido], hoy: date,
+              dias_entregado: int | None = DIAS_ENTREGADO_VISIBLE) -> dict[str, list[Pedido]]:
     """Los pedidos del tablero, agrupados por etapa y ordenados por fecha de entrega."""
     grupos: dict[str, list[Pedido]] = {e.clave: [] for e in ETAPAS}
     for p in pedidos:
-        if p.etapa in grupos and visible_en_tablero(p, hoy):
+        if p.etapa in grupos and visible_en_tablero(p, hoy, dias_entregado):
             grupos[p.etapa].append(p)
     for clave, lista in grupos.items():
         lista.sort(key=lambda p: (p.fecha_entregado or p.fecha_entrega),

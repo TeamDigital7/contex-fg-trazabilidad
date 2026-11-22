@@ -14,7 +14,11 @@ Pedido recibido → Producción → Inspección final → Despacho → Entregado
 - **Detalle del pedido** (tocando la tarjeta): avance general, las cinco etapas,
   las sub-etapas de producción y la línea de tiempo con cada registro ISO,
   responsable y evidencia.
-- **Ver como**: el equipo ve todo; cada cliente ve solo sus pedidos.
+- **Cliente** (barra lateral): cada opción es un cliente y muestra solo sus pedidos;
+  «Todos los clientes» muestra todos. En el tablero, «Todo el historial» incluye
+  los entregados antiguos.
+- **Descargas**: resumen en PDF y Excel con detalle, y la **proforma** de cada pedido
+  (PDF con logo, precios, IGV, total y el estado de la trazabilidad).
 - **Lista de pedidos** con filtro y descarga CSV, y **Conexión de datos**.
 
 ## Datos: demo hoy, la base del cliente mañana
@@ -59,5 +63,5 @@ trazabilidad/conectores/       demo, SQL y el mapeo único tablas → pedidos
 tests/test_trazabilidad.py     modelo, mapeo, SQLite real y la app con AppTest
 ```
 
-**Pendiente antes de producción:** login. Hoy "Ver como" es un selector; con
+**Pendiente antes de producción:** login. Hoy el selector de cliente es libre; con
 datos reales cada cliente debe entrar con su usuario y ver solo lo suyo.

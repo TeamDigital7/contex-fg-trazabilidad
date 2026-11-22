@@ -99,6 +99,37 @@ class Mapeo(unittest.TestCase):
         self.assertIn("&amp; Cía", html)
 
 
+class Reportes(unittest.TestCase):
+    def setUp(self):
+        from trazabilidad import reportes
+        self.r = reportes
+        self.pedidos, _ = pedidos_desde_tablas(ConectorDemo(HOY).leer_tablas())
+
+    def test_proforma_pdf_con_totales(self):
+        p = next(x for x in self.pedidos if x.codigo == "PED-2026-0012")
+        self.assertTrue(p.con_precios)
+        self.assertAlmostEqual(p.subtotal, 130 * 42.0 + 120 * 69.9)
+        pdf = self.r.pdf_pedido(p, HOY, demo=True)
+        self.assertTrue(pdf.startswith(b"%PDF"))
+        self.assertGreater(len(pdf), 3000)
+
+    def test_sin_precios_tambien_sale(self):
+        pdf = self.r.pdf_pedido(pedido(cliente="Señora — Ñandú “test”"), HOY)
+        self.assertTrue(pdf.startswith(b"%PDF"))
+
+    def test_resumen_y_excel(self):
+        import openpyxl, io
+        self.assertTrue(self.r.pdf_resumen(self.pedidos, HOY, "Todos").startswith(b"%PDF"))
+        libro = openpyxl.load_workbook(io.BytesIO(self.r.excel_resumen(self.pedidos, HOY, "Todos")))
+        self.assertEqual(libro.sheetnames, ["Resumen", "Pedidos", "Productos", "Registro ISO"])
+        self.assertEqual(libro["Pedidos"].max_row, len(self.pedidos) + 1)
+
+    def test_historial_muestra_entregados_antiguos(self):
+        corto = por_etapa(self.pedidos, HOY)["entregado"]
+        todo = por_etapa(self.pedidos, HOY, None)["entregado"]
+        self.assertGreater(len(todo), len(corto))
+
+
 class ConectorSQLReal(unittest.TestCase):
     """El conector SQL se prueba contra un SQLite de verdad con las tablas de la demo."""
 
@@ -175,6 +206,16 @@ class App(unittest.TestCase):
         self.assertIn("logo-caja", self.html(at))
         activos = [b.key for b in at.button if b.key.startswith("nav_") and b.proto.type == "primary"]
         self.assertEqual(activos, ["nav_Tablero"])
+
+    def test_descargas_y_selector(self):
+        at = self.correr()
+        self.assertEqual(at.selectbox[0].label, "Cliente")
+        self.assertTrue(at.selectbox[0].options[0].startswith("Todos los clientes"))
+        self.assertIn("Agroindustrias Valle Verde", at.selectbox[0].options)
+        at.segmented_control[0].set_value("Todo el historial").run()
+        self.assertIn("ISO 9.1.2 · historial", self.html(at))
+        at = self.correr(pedido="PED-2026-0012")
+        self.assertTrue(any(b.key == "descarga_proforma" for b in at.get("download_button")))
 
     def test_lista_y_conexion(self):
         at = self.correr()

@@ -69,7 +69,7 @@ html, body, [data-testid="stAppViewContainer"] { font-family: 'Inter', system-ui
 .tablero-cab b { color:var(--texto); font-size:1rem; font-weight:700; }
 .tablero { display:grid; grid-template-columns:repeat(5, minmax(168px, 1fr)); gap:.7rem;
            overflow-x:auto; padding-bottom:.5rem; align-items:start; }
-.columna { background:var(--panel); border-radius:16px; padding:.85rem .7rem 1rem; min-height:440px;
+.columna { background:var(--panel); border-radius:16px; padding:.85rem .7rem 1rem; min-height:280px;
            border-top:3px solid var(--marino); }
 .columna header { display:flex; justify-content:space-between; align-items:center; gap:.4rem; }
 .columna h3 { font-size:.92rem; font-weight:700; margin:0; color:var(--texto); padding:0; }
@@ -175,6 +175,15 @@ a.tarjeta, a.tarjeta:hover, a.tarjeta:visited { text-decoration:none; color:inhe
 [data-testid="stSidebar"] [data-testid="stElementContainer"]:has(.rail-pie) { margin-top:1rem; margin-bottom:.4rem; }
 [data-testid="stSidebar"] [data-testid="stSelectbox"] svg { fill:#93A4BF !important; }
 
+/* Lista desplegable del selector de cliente */
+div[role="listbox"] [role="option"], ul[role="listbox"] li { font-size:.88rem !important; }
+.cliente-sel { color:#93A4BF; font-size:.72rem; margin:-.1rem 0 0 .2rem; }
+
+/* Barra de herramientas del tablero */
+div.st-key-herramientas [data-testid="stHorizontalBlock"] { align-items:center; }
+div.st-key-herramientas [data-testid="stPopover"] button, div[class*="st-key-descarga"] button {
+  border-radius:10px; font-weight:600; }
+
 /* Menú: botones planos, la pantalla actual en píldora azul */
 [data-testid="stSidebar"] div[class*="st-key-nav_"] button {
   justify-content:flex-start; width:100%; min-height:44px; border-radius:11px; border:none; padding:0 .85rem;
@@ -197,6 +206,9 @@ a.tarjeta, a.tarjeta:hover, a.tarjeta:visited { text-decoration:none; color:inhe
 [data-testid="stSidebar"] div.st-key-actualizar button:hover { background:rgba(255,255,255,.07); }
 [data-testid="stSidebarCollapseButton"] * { color:#93A4BF !important; }
 
+/* Solo en el teléfono: accesos rápidos a cada etapa */
+.etapas-nav { display:none; }
+
 /* --- Teléfono -------------------------------------------------------------- */
 @media (max-width: 1100px) { .kpis { grid-template-columns:repeat(3, minmax(0,1fr)); } }
 @media (max-width: 900px) {
@@ -205,10 +217,31 @@ a.tarjeta, a.tarjeta:hover, a.tarjeta:visited { text-decoration:none; color:inhe
 }
 @media (max-width: 640px) {
   .block-container { padding-left:1rem; padding-right:1rem; padding-top:3.2rem; }
-  .kpi { flex-direction:column; align-items:flex-start; gap:.45rem; }
-  .kpi-ico { flex:0 0 auto; width:34px; height:34px; }
-  .tablero { grid-template-columns:1fr; overflow-x:visible; }
-  .columna { min-height:0; }
+  [data-testid="stHeader"] { background:var(--fondo); }
+  .titulo h1 { font-size:1.35rem; }
+  .titulo-der .hoy { display:none; }
+  /* Indicadores: una tira que se desliza, no cinco tarjetas apiladas */
+  .kpis { display:flex; overflow-x:auto; scroll-snap-type:x mandatory; gap:.6rem; margin:0 -1rem 1rem;
+          padding:0 1rem .3rem; scrollbar-width:none; }
+  .kpis::-webkit-scrollbar { display:none; }
+  .kpi { flex:0 0 66%; scroll-snap-align:start; padding:.75rem .85rem; }
+  .kpi-ico { flex:0 0 34px; height:34px; }
+  .kpi-v { font-size:1.3rem; }
+  /* Tablero: etapas una debajo de otra; la barra de accesos queda fija arriba */
+  .tablero-cab span { display:none; }
+  .etapas-nav { display:flex; gap:.45rem; overflow-x:auto; margin:0 -1rem .7rem; padding:.5rem 1rem;
+                scrollbar-width:none; position:sticky; top:2.9rem; z-index:5; background:var(--fondo); }
+  .etapas-nav::-webkit-scrollbar { display:none; }
+  .etapas-nav a { flex:0 0 auto; text-decoration:none; color:var(--marino); background:var(--tarjeta);
+                  border:1px solid var(--borde); border-radius:99px; padding:.45rem .8rem; font-size:.8rem;
+                  font-weight:600; box-shadow:var(--sombra); min-height:40px; display:flex; align-items:center; gap:.4rem; }
+  .etapas-nav a b { background:var(--marino); color:#fff; border-radius:99px; font-size:.7rem; padding:.05rem .45rem; }
+  .tablero { grid-template-columns:1fr; overflow-x:visible; gap:.9rem; }
+  .columna { min-height:0; scroll-margin-top:7rem; }
+  .columna .vacio { padding:.8rem; }
+  .tarjeta { padding:.9rem .95rem .85rem; }
+  .tarjeta:hover { transform:none; }
+  .cliente { font-size:.98rem; }
   .stepper { grid-template-columns:1fr; gap:.6rem; text-align:left; padding:1rem; }
   .paso { display:grid; grid-template-columns:40px 1fr; text-align:left; align-items:center; }
   .paso .bola { margin:0; grid-row:span 2; }

@@ -25,7 +25,7 @@ COLUMNAS = {
     },
     "lineas": {
         "obligatorias": ["codigo_pedido", "producto", "cantidad"],
-        "opcionales": [],
+        "opcionales": ["precio_unitario"],
     },
     "eventos": {
         "obligatorias": ["codigo_pedido", "fecha", "etapa", "descripcion"],
@@ -130,7 +130,9 @@ def pedidos_desde_tablas(tablas: Tablas) -> tuple[list[Pedido], list[str]]:
     for fila in lineas_df.to_dict("records"):
         codigo = _texto(fila.get("codigo_pedido"))
         lineas_por_pedido.setdefault(codigo, []).append(
-            Linea(producto=_texto(fila.get("producto")), cantidad=int(_num(fila.get("cantidad"))))
+            Linea(producto=_texto(fila.get("producto")), cantidad=int(_num(fila.get("cantidad"))),
+                  precio_unitario=(None if _texto(fila.get("precio_unitario")) == ""
+                                   else _num(fila.get("precio_unitario"), None)))
         )
 
     eventos_por_pedido: dict[str, list[Evento]] = {}
