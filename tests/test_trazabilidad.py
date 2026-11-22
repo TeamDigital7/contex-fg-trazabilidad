@@ -219,6 +219,25 @@ class WhatsApp(unittest.TestCase):
         self.assertEqual(tipos, ["text", "document", "document"])
         self.assertTrue(all("id wamid.1" in p.detalle for p in res.pasos))
 
+    def test_config_pegada_con_caracteres_raros(self):
+        meta = FalsoMeta()
+        # espacios invisibles al copiar del panel de Meta: se limpian y funciona
+        api = self.w.WhatsAppCloud(" EAAG123 ", "1098\u200b7654 3210", abrir=meta)
+        api.enviar_avance("51987654321", "Hola", ["a"] * 6, self.docs)
+        self.assertIn("/10987654 3210".replace(" ", "") + "/", meta.peticiones[0][0])
+        # el "…" del ejemplo: error claro, no UnicodeEncodeError
+        with self.assertRaisesRegex(self.w.ErrorWhatsApp, "solo números"):
+            self.w.WhatsAppCloud("EAAG", "…")
+        with self.assertRaisesRegex(self.w.ErrorWhatsApp, "token"):
+            self.w.WhatsAppCloud("EAAG…", "123")
+
+    def test_un_fallo_inesperado_no_tumba_la_pantalla(self):
+        def explota(req, timeout=None):
+            raise UnicodeEncodeError("ascii", "x", 0, 1, "malo")
+        res = self.w.WhatsAppCloud("T", "999", abrir=explota).enviar_avance("51987654321", "x", ["a"] * 6, self.docs)
+        self.assertFalse(res.enviado)
+        self.assertEqual(res.pasos[0].estado, "error")
+
     def test_sin_numero_no_envia(self):
         meta = FalsoMeta()
         res = self.w.WhatsAppCloud("T", "999", abrir=meta).enviar_avance("", "x", [], self.docs)

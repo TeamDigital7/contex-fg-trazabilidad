@@ -154,6 +154,32 @@ def enlace_wa_me(telefono: str, texto: str) -> str:
 
 # --- Cliente de la Cloud API -----------------------------------------------------
 
+def limpiar_numero_id(valor: object) -> str:
+    """El `phone_number_id` de Meta son solo dígitos (ej. 109876543210987).
+
+    Al copiarlo del panel se suelen colar espacios invisibles o el "…" de un
+    ejemplo; con eso la dirección de envío deja de ser ASCII y Python revienta
+    con UnicodeEncodeError. Si quedan letras, el valor está mal y se dice.
+    """
+    texto = re.sub(r"[\s\u200b\u00a0\ufeff]", "", str(valor or ""))
+    if texto and not texto.isdigit():
+        raise ErrorWhatsApp(
+            "El `phone_number_id` de Secrets no es válido: tienen que ser solo números "
+            "(está en Meta → WhatsApp → API Setup → «Phone number ID»). "
+            "No es tu número de celular y no lleva «…» ni espacios.")
+    return texto
+
+
+def limpiar_token(valor: object) -> str:
+    """El token es ASCII: espacios o caracteres raros al pegarlo lo dejan inservible."""
+    texto = re.sub(r"[\s\u200b\u00a0\ufeff]", "", str(valor or ""))
+    if texto and (not texto.isascii() or "…" in str(valor)):
+        raise ErrorWhatsApp(
+            "El `token` de Secrets tiene caracteres que no son válidos (¿quedó el «…» del ejemplo?). "
+            "Cópialo completo otra vez desde Meta → WhatsApp → API Setup.")
+    return texto
+
+
 class ErrorWhatsApp(Exception):
     def __init__(self, mensaje: str, codigo: int | None = None):
         super().__init__(mensaje)
@@ -187,10 +213,13 @@ class Resultado:
 class WhatsAppCloud:
     def __init__(self, token: str, phone_number_id: str, plantilla: str = "avance_pedido",
                  idioma: str = "es", version: str = VERSION_API, abrir=urllib.request.urlopen):
-        if not token or not phone_number_id:
+        token, numero_id = limpiar_token(token), limpiar_numero_id(phone_number_id)
+        if not token or not numero_id:
             raise ErrorWhatsApp("Faltan `token` o `phone_number_id` en la sección [whatsapp] de Secrets.")
-        self.token, self.numero_id = token, str(phone_number_id)
-        self.plantilla, self.idioma, self.version = plantilla, idioma, version
+        self.token, self.numero_id = token, numero_id
+        self.plantilla = str(plantilla or "").strip()
+        self.idioma = str(idioma or "es").strip() or "es"
+        self.version = re.sub(r"[^v0-9.]", "", str(version or "")) or VERSION_API
         self._abrir = abrir
 
     @classmethod
@@ -220,6 +249,9 @@ class WhatsAppCloud:
             raise ErrorWhatsApp(f"WhatsApp respondió {exc.code}: {detalle}", error.get("code")) from exc
         except urllib.error.URLError as exc:
             raise ErrorWhatsApp(f"No se pudo conectar con WhatsApp: {exc.reason}") from exc
+        except (UnicodeError, ValueError, OSError) as exc:  # nada de esto puede tumbar la pantalla
+            raise ErrorWhatsApp(f"No se pudo enviar ({type(exc).__name__}). Revisa la sección [whatsapp] "
+                                "de Secrets.") from exc
 
     def subir(self, doc: Documento) -> str:
         """Sube el archivo a Meta y devuelve su id (vale 30 días)."""

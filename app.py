@@ -169,11 +169,12 @@ def boton_descargas(pedidos: list[Pedido], hoy: date, vista: str, es_demo: bool,
                            icon=":material/table_view:", key=f"descarga_xlsx_{clave}", width="stretch")
 
 
-def cliente_whatsapp() -> whatsapp.WhatsAppCloud | None:
+def cliente_whatsapp() -> tuple[whatsapp.WhatsAppCloud | None, str]:
+    """(api, error de configuración). Una configuración mala se DICE, no cae a la demo callada."""
     try:
-        return whatsapp.WhatsAppCloud.desde_config(seccion_de_secrets("whatsapp"))
-    except whatsapp.ErrorWhatsApp:
-        return None
+        return whatsapp.WhatsAppCloud.desde_config(seccion_de_secrets("whatsapp")), ""
+    except whatsapp.ErrorWhatsApp as exc:
+        return None, str(exc)
 
 
 A_MI = "Mi número (prueba)"
@@ -183,7 +184,7 @@ A_CLIENTE = "Cliente"
 @st.dialog("Enviar por WhatsApp", width="large")
 def dialogo_whatsapp(titulo: str, telefono_inicial: str, texto: str, variables: list[str],
                      documentos: list[whatsapp.Documento], clave: str) -> None:
-    api = cliente_whatsapp()
+    api, error_config = cliente_whatsapp()
     config = seccion_de_secrets("whatsapp")
     numero_pruebas = str(config.get("numero_pruebas", "") or "")
     solo_pruebas = str(config.get("solo_pruebas", "")).strip().lower() in ("true", "1", "si", "sí")
@@ -215,6 +216,8 @@ def dialogo_whatsapp(titulo: str, telefono_inicial: str, texto: str, variables: 
     st.markdown(f'<div class="wsp-adjuntos">{adjuntos}</div>', unsafe_allow_html=True)
 
     etiqueta_boton = "Enviarme la prueba" if destino == A_MI else "Enviar al cliente"
+    if error_config:
+        st.error(f"**La configuración de WhatsApp tiene un problema.** {error_config}")
     if api is not None:
         if st.button(etiqueta_boton, type="primary", icon=":material/send:", width="stretch",
                      disabled=not telefono or bloqueado, key=f"wsp_enviar_{clave}"):
