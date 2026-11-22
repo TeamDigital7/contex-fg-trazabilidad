@@ -39,6 +39,31 @@ así que lo que el cliente ve en la demo es exactamente lo que verá con sus dat
 Agregar el driver de su base en `requirements.txt` (psycopg2-binary, pymysql,
 pyodbc u oracledb).
 
+## Módulo de costos
+
+Menú **Costos** (solo equipo interno; los clientes no ven costos ni márgenes). Costea
+cada orden de trabajo con el modelo del ERP de Contex (liquidación de órdenes de
+proceso) y agrega lo que el reporte «Costos de Orden de Trabajo» no tiene:
+
+- **Costo de la OT** = materia prima consumida + merma + mano de obra directa
+  (horas × tarifa) + servicios de terceros (órdenes de servicio de confección,
+  bordado, estampado, lavado) + **costos indirectos (CIF) asignados**.
+- **Centros de costo**: Corte, Bordado, Estampado, Confección, Lavado, Taller de
+  arreglos, Limpieza y acabado (productivos) y Planta general (apoyo).
+- **Regla de asignación de CIF** elegible: horas de mano de obra, unidades o costo de
+  materia prima. Un centro productivo solo carga a las OT que pasaron por él; el de
+  apoyo, a todas. Lo que no se puede asignar se reporta, no se esconde.
+- **Margen** contra la venta (sin IGV), solo en OT que ya salieron de producción;
+  alerta bajo el 15 %. **Costo de no calidad** (merma + taller de arreglos) y
+  **desvíos de consumo** contra la ficha técnica.
+- **Cierre mensual** con revisión previa y Excel congelado del cierre; **tablas
+  maestras** (tarifas por hora, centros de costo) y CIF del mes editables.
+- Descargas: Excel de costos (7 hojas) y el **reporte de costo de la OT en PDF**.
+
+Para la base real: consultas `costos_materiales`, `costos_mano_obra`,
+`costos_terceros` y `costos_cif` en `[datos.consultas]` (columnas en la pantalla
+«Conexión de datos»).
+
 ## WhatsApp: el avance al cliente con un clic
 
 Botón **"Enviar por WhatsApp"** en el detalle de cada pedido (mensaje + PDF + Excel

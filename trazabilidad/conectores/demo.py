@@ -164,3 +164,7 @@ class ConectorDemo(Conector):
 
     def leer_tablas(self) -> Tablas:
         return generar_tablas(self.hoy)
+
+    def leer_costos(self):
+        from trazabilidad.conectores.demo_costos import generar_costos
+        return generar_costos(generar_tablas(self.hoy), self.hoy)

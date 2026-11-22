@@ -257,6 +257,76 @@ class WhatsApp(unittest.TestCase):
         self.assertIsNone(self.w.WhatsAppCloud.desde_config({}))
 
 
+class Costos(unittest.TestCase):
+    def setUp(self):
+        from trazabilidad import costos
+        self.c = costos
+        conector = ConectorDemo(HOY)
+        self.pedidos, _ = pedidos_desde_tablas(conector.leer_tablas())
+        self.tablas = conector.leer_costos()
+
+    def test_los_elementos_suman_el_total(self):
+        r = self.c.costear(self.pedidos, self.tablas)
+        suma = r.por_ot[list(self.c.ELEMENTOS)].sum(axis=1)
+        self.assertTrue(((suma - r.por_ot["Costo total"]).abs() < 0.01).all())
+        self.assertAlmostEqual(sum(r.kpis["elementos"].values()), r.kpis["costo_total"], places=2)
+
+    def test_el_cif_se_reparte_entero_o_se_reporta(self):
+        for periodo in self.c.periodos(self.tablas):
+            for base in self.c.BASES:
+                r = self.c.costear(self.pedidos, self.tablas, periodo, base)
+                repartido = r.asignacion["Asignado"].sum()
+                self.assertAlmostEqual(repartido + r.kpis["cif_sin_asignar"], r.kpis["cif_total"], places=2,
+                                       msg=f"{periodo} {base}")
+
+    def test_cif_de_un_centro_solo_va_a_quien_paso_por_el(self):
+        r = self.c.costear(self.pedidos, self.tablas, "2026-11", "horas")
+        corte = r.asignacion[(r.asignacion["Centro"] == "Corte") & (r.asignacion["OT"] != "— sin asignar —")]
+        con_corte = set(r.mano_obra.loc[r.mano_obra["Proceso"] == "COR", "OT"])
+        self.assertTrue(set(corte["OT"]) <= con_corte)
+
+    def test_sin_margen_si_la_ot_no_termino(self):
+        r = self.c.costear(self.pedidos, self.tablas)
+        en_proceso = r.por_ot[r.por_ot["Costo"] == "En proceso"]
+        self.assertTrue(len(en_proceso))
+        self.assertTrue(en_proceso["Margen %"].isna().all())
+        # y con un mes elegido no hay margen para nadie (la venta es de la OT entera)
+        self.assertTrue(self.c.costear(self.pedidos, self.tablas, "2026-11").por_ot["Margen %"].isna().all())
+
+    def test_la_ot_con_no_conforme_queda_bajo_el_margen_minimo(self):
+        r = self.c.costear(self.pedidos, self.tablas)
+        fila = r.por_ot[r.por_ot["OT"] == "PED-2026-0012"].iloc[0]
+        self.assertLess(fila["Margen %"], self.c.MARGEN_MINIMO)
+        self.assertGreater(r.kpis["no_calidad"], 0)
+
+    def test_tarifa_del_maestro_cuando_la_liquidacion_no_la_trae(self):
+        import pandas as pd
+        tablas = self.c.TablasCosto(
+            materiales=pd.DataFrame(columns=self.c.COLUMNAS["materiales"]),
+            mano_obra=pd.DataFrame([{"codigo_pedido": "PED-2026-0012", "fecha": "2026-11-10", "proceso": "COR",
+                                     "personal": "X", "horas": 10, "tarifa_hora": None}]),
+            terceros=pd.DataFrame(columns=self.c.COLUMNAS["terceros"]),
+            cif=pd.DataFrame(columns=self.c.COLUMNAS["cif"]), tarifas={"COR": 9.5})
+        r = self.c.costear(self.pedidos, tablas)
+        self.assertAlmostEqual(r.por_ot.iloc[0]["Mano de obra"], 95.0)
+
+    def test_columna_faltante_se_explica(self):
+        malo = self.c.TablasCosto(self.tablas.materiales.drop(columns=["costo_unitario"]), self.tablas.mano_obra,
+                                  self.tablas.terceros, self.tablas.cif)
+        with self.assertRaisesRegex(self.c.ErrorDeCostos, "costo_unitario"):
+            self.c.costear(self.pedidos, malo)
+
+    def test_excel_y_pdf(self):
+        import io, openpyxl
+        r = self.c.costear(self.pedidos, self.tablas, "2026-11")
+        libro = openpyxl.load_workbook(io.BytesIO(self.c.excel_cierre(r)))
+        self.assertIn("Asignación CIF", libro.sheetnames)
+        self.assertEqual(libro["Costo por OT"].max_row, len(r.por_ot) + 1)
+        r = self.c.costear(self.pedidos, self.tablas)
+        p = next(x for x in self.pedidos if x.codigo == "PED-2026-0012")
+        self.assertTrue(self.c.pdf_costo_ot(r, "PED-2026-0012", p, HOY, True).startswith(b"%PDF"))
+
+
 class ConectorSQLReal(unittest.TestCase):
     """El conector SQL se prueba contra un SQLite de verdad con las tablas de la demo."""
 
@@ -354,6 +424,20 @@ class App(unittest.TestCase):
         at = self.correr(vista="Minera Los Andes S.A.C. (demo)")
         at.button(key="wsp_cliente").click().run()
         self.assertFalse(at.exception, at.exception)
+
+    def test_modulo_de_costos(self):
+        at = self.correr()
+        at.button(key="nav_Costos").click().run()
+        self.assertFalse(at.exception, at.exception)
+        self.assertFalse(at.error, [e.value for e in at.error])
+        self.assertEqual(at.selectbox(key="costos_periodo").options[:2], ["Todo el historial", "Noviembre 2026"])
+        at.selectbox(key="costos_periodo").set_value("2026-11").run()
+        at.button(key="cerrar").click().run()
+        self.assertTrue(any("Periodo cerrado" in x.value for x in at.success))
+
+    def test_el_cliente_no_ve_costos(self):
+        at = self.correr(vista="Minera Los Andes S.A.C. (demo)")
+        self.assertNotIn("nav_Costos", [b.key for b in at.button])
 
     def test_lista_y_conexion(self):
         at = self.correr()

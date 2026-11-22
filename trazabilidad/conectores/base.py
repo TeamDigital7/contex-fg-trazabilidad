@@ -53,6 +53,10 @@ class Conector(ABC):
     def leer_tablas(self) -> Tablas:
         """Lee las tres tablas de la fuente."""
 
+    def leer_costos(self):
+        """Las tablas del módulo de costos (`costos.TablasCosto`), o None si la fuente no las tiene."""
+        return None
+
     def probar(self) -> str:
         """Comprueba la conexión. Devuelve un texto para la pantalla o levanta."""
         t = self.leer_tablas()

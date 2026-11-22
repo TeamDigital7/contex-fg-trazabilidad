@@ -38,3 +38,18 @@ class ConectorSQL(Conector):
         finally:
             motor.dispose()
         return Tablas(tablas["pedidos"], tablas["lineas"], tablas["eventos"])
+
+    def leer_costos(self):
+        """Las consultas costos_* de [datos.consultas] (opcionales). Sin ellas: None."""
+        from trazabilidad.costos import TablasCosto
+        claves = ("costos_materiales", "costos_mano_obra", "costos_terceros", "costos_cif")
+        if not all(self.consultas.get(c) for c in claves):
+            return None
+        from sqlalchemy import create_engine, text
+        motor = create_engine(self.url, pool_pre_ping=True)
+        try:
+            with motor.connect() as cx:
+                t = {c: pd.read_sql(text(self.consultas[c]), cx) for c in claves}
+        finally:
+            motor.dispose()
+        return TablasCosto(t["costos_materiales"], t["costos_mano_obra"], t["costos_terceros"], t["costos_cif"])

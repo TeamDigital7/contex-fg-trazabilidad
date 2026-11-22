@@ -15,7 +15,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from trazabilidad import reportes, vistas, whatsapp
+from trazabilidad import costos, reportes, vistas, whatsapp
 from trazabilidad.conectores import COLUMNAS, ErrorDeDatos, obtener_conector, pedidos_desde_tablas
 from trazabilidad.estilos import CSS
 from trazabilidad.modelo import (DIAS_PRODUCCION_POR_DEFECTO, ETAPAS_POR_CLAVE, Pedido,
@@ -39,6 +39,11 @@ def config_de_datos() -> dict:
     return seccion_de_secrets("datos")
 
 
+@st.cache_data(ttl=300, show_spinner="Leyendo costos…")
+def cargar_costos(config_json: str) -> costos.TablasCosto | None:
+    return obtener_conector(json.loads(config_json)).leer_costos()
+
+
 @st.cache_data(ttl=300, show_spinner="Leyendo pedidos…")
 def cargar(config_json: str) -> tuple[list[Pedido], list[str], str, bool]:
     conector = obtener_conector(json.loads(config_json))
@@ -56,6 +61,7 @@ def parametro(nombre: str) -> str:
 MENU = {
     "Tablero": ":material/view_kanban:",
     "Lista de pedidos": ":material/format_list_bulleted:",
+    "Costos": ":material/payments:",
     "Conexión de datos": ":material/database:",
 }
 LOGO = Path(__file__).parent / "assets" / "logo_contex.png"
@@ -117,7 +123,8 @@ def barra_lateral(clientes: dict[str, int], fuente: str, es_demo: bool) -> tuple
                     f'<div><b>{vistas.esc(nombre)}</b><span>{rol}</span></div></div>',
                     unsafe_allow_html=True)
 
-        paginas = list(MENU) if vista == INTERNO else list(MENU)[:2]
+        # Costos y márgenes son información interna: un cliente nunca los ve.
+        paginas = list(MENU) if vista == INTERNO else ["Tablero", "Lista de pedidos"]
         if st.session_state.get("pagina") not in paginas:
             st.session_state["pagina"] = paginas[0]
         actual = st.session_state["pagina"]
@@ -366,6 +373,230 @@ def pagina_detalle(p: Pedido, pedidos: list[Pedido], hoy: date, vista: str, dias
             st.rerun()
 
 
+# --- Costos ----------------------------------------------------------------------
+
+TODO = "Todo el historial"
+FORMATO_SOLES = st.column_config.NumberColumn(format="accounting")  # 1,234.00 · montos en soles
+
+
+def nombre_del_mes(periodo: str) -> str:
+    """"2026-11" -> "Noviembre 2026"."""
+    if periodo == TODO or len(periodo) != 7:
+        return periodo
+    meses = ("Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre",
+             "Octubre", "Noviembre", "Diciembre")
+    return f"{meses[int(periodo[5:]) - 1]} {periodo[:4]}"
+
+
+def tablas_con_ediciones(base: costos.TablasCosto) -> costos.TablasCosto:
+    """Las tablas de la fuente + lo editado en la sesión (tarifas y CIF del mes)."""
+    tarifas = {**base.tarifas, **st.session_state.get("costos_tarifas", {})}
+    cif = base.cif.copy()
+    for periodo, df in st.session_state.get("costos_cif", {}).items():
+        cif = pd.concat([cif[cif["periodo"].astype(str).str[:7] != periodo], df.assign(periodo=periodo)],
+                        ignore_index=True)
+    return costos.TablasCosto(base.materiales, base.mano_obra, base.terceros, cif, tarifas)
+
+
+def pagina_costos(pedidos: list[Pedido], hoy: date, config: dict, fuente: str, es_demo: bool) -> None:
+    encabezado("Costos de producción", "Costo real por orden de trabajo, centros de costo y cierre mensual",
+               fuente, es_demo, ruta="Costos")
+    try:
+        base = cargar_costos(json.dumps(config, sort_keys=True, default=str))
+    except Exception as exc:  # la fuente respondió mal: se dice, no se cae
+        st.error(f"No se pudieron leer los costos: {exc}")
+        return
+    if base is None:
+        st.info("La fuente de datos todavía no tiene las consultas de costos. Agrega `costos_materiales`, "
+                "`costos_mano_obra`, `costos_terceros` y `costos_cif` en `[datos.consultas]` (ver «Conexión "
+                "de datos»). Con los datos de demostración este módulo funciona completo.")
+        return
+    tablas = tablas_con_ediciones(base)
+    lista_periodos = costos.periodos(tablas)
+
+    c1, c2, c3 = st.columns([2, 2.4, 1.3])
+    with c1:
+        periodo_txt = st.selectbox("Periodo", [TODO] + lista_periodos, index=0, key="costos_periodo",
+                                   format_func=nombre_del_mes)
+    with c2:
+        base_clave = st.selectbox("Asignar costos indirectos por", list(costos.BASES), key="costos_base",
+                                  format_func=costos.BASES.get,
+                                  help="Regla para repartir los CIF de cada centro de costo entre las OT.")
+    periodo = None if periodo_txt == TODO else periodo_txt
+    res = costos.costear(pedidos, tablas, periodo, base_clave, hoy)
+    with c3:
+        st.markdown('<div style="height:1.75rem"></div>', unsafe_allow_html=True)
+        st.download_button("Excel de costos", costos.excel_cierre(res), icon=":material/download:",
+                           file_name=f"costos_{res.periodo.replace(' ', '_')}.xlsx", width="stretch",
+                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                           key="costos_excel")
+
+    if res.por_ot.empty:
+        st.info("No hay movimientos de costo en este periodo.")
+        return
+    st.markdown(vistas.fila_indicadores_costos(res.kpis, res.periodo), unsafe_allow_html=True)
+    resumen, por_ot, centros, cierre, maestros = st.tabs(
+        ["Resumen", "Por orden de trabajo", "Centros de costo y CIF", "Cierre mensual", "Tablas maestras"])
+
+    with resumen:
+        izq, der = st.columns([1.15, 1], gap="medium")
+        with izq:
+            st.markdown(vistas.estructura_del_costo(res.kpis["elementos"]), unsafe_allow_html=True)
+        with der:
+            filas = [(r["Centro"], r["Total"]) for r in res.por_proceso.sort_values("Total", ascending=False)
+                     .to_dict("records")]
+            st.markdown(vistas.barras_por_centro(filas, "Costo por centro de costo",
+                                                 "Materia prima + mano de obra + terceros + CIF de cada centro"),
+                        unsafe_allow_html=True)
+        st.markdown('<div class="seccion-t">Costo y margen por orden de trabajo</div>', unsafe_allow_html=True)
+        st.caption("Montos en soles (S/), sin IGV.")
+        tabla = res.por_ot[["OT", "Cliente", "Unidades", "Costo", "Costo total", "Costo unitario",
+                            "Venta (sin IGV)", "Margen %"]].copy()
+        tabla["Margen %"] = tabla["Margen %"] * 100
+        st.dataframe(tabla, hide_index=True, width="stretch", column_config={
+            "Costo total": FORMATO_SOLES, "Costo unitario": FORMATO_SOLES, "Venta (sin IGV)": FORMATO_SOLES,
+            "Margen %": st.column_config.NumberColumn(format="%.1f %%", help="Solo OT que ya salieron de producción"),
+            "Costo": st.column_config.TextColumn(help="«En proceso»: costo acumulado hasta hoy, sin margen"),
+        })
+        bajos = res.por_ot[res.por_ot["Margen %"] < costos.MARGEN_MINIMO]
+        for r in bajos.to_dict("records"):
+            st.warning(f"**{r['OT']}** ({r['Cliente']}) tiene margen de **{r['Margen %']:.1%}**, debajo del "
+                       f"mínimo de {costos.MARGEN_MINIMO:.0%}. Revisa su detalle en «Por orden de trabajo».")
+
+    with por_ot:
+        opciones = res.por_ot["OT"].tolist()
+        info = {p.codigo: p for p in pedidos}
+        elegido = st.selectbox("Orden de trabajo", opciones, key="costos_ot",
+                               format_func=lambda c: f"{c} · {nombre_corto(info[c].cliente)} · {info[c].productos}")
+        fila = res.por_ot[res.por_ot["OT"] == elegido].iloc[0]
+        det = costos.detalle_ot(res, elegido)
+        a, b, c, d = st.columns(4)
+        a.metric("Costo total", vistas.soles(fila["Costo total"]))
+        b.metric("Costo unitario", vistas.soles(fila["Costo unitario"]), help=f"{int(fila['Unidades'])} unidades")
+        c.metric("Venta (sin IGV)", vistas.soles(fila["Venta (sin IGV)"]) if pd.notna(fila["Venta (sin IGV)"]) else "—")
+        d.metric("Margen", f"{fila['Margen %']:.1%}" if pd.notna(fila["Margen %"]) else fila["Costo"])
+        st.markdown(vistas.estructura_del_costo({e: float(fila[e]) for e in costos.ELEMENTOS}),
+                    unsafe_allow_html=True)
+        ver_mp, ver_te, ver_mo, ver_cif, ver_desv = st.tabs(
+            ["Materia prima", "Terceros", "Mano de obra", "CIF asignado", "Desvíos vs ficha técnica"])
+        mon = {k: FORMATO_SOLES for k in ("Costo unit.", "Costo", "Tarifa/h", "Monto", "Asignado", "Valor del desvío")}
+        mon["Fecha"] = st.column_config.DatetimeColumn(format="DD/MM/YYYY")
+        with ver_mp:
+            st.dataframe(det["materiales"].drop(columns=["OT"]), hide_index=True, width="stretch", column_config=mon)
+        with ver_te:
+            st.dataframe(det["terceros"].drop(columns=["OT"]), hide_index=True, width="stretch", column_config=mon)
+        with ver_mo:
+            st.dataframe(det["mano_obra"].drop(columns=["OT"]), hide_index=True, width="stretch", column_config=mon)
+        with ver_cif:
+            cif_ot = det["cif"].drop(columns=["OT"]).copy()
+            cif_ot["% de la base"] = cif_ot["% de la base"] * 100
+            st.dataframe(cif_ot, hide_index=True, width="stretch",
+                         column_config={**mon, "% de la base": st.column_config.NumberColumn(format="%.1f %%")})
+        with ver_desv:
+            dv = det["desvios"].drop(columns=["OT"]).copy()
+            dv["Desvío %"] = dv["Desvío %"] * 100
+            st.caption("Lo usado (consumo + merma) contra lo que pedía la ficha técnica. Positivo = se usó de más.")
+            st.dataframe(dv, hide_index=True, width="stretch",
+                         column_config={**mon, "Desvío %": st.column_config.NumberColumn(format="%+.1f %%")})
+        st.download_button("Reporte de costo de la OT (PDF)",
+                           costos.pdf_costo_ot(res, elegido, info[elegido], hoy, es_demo),
+                           file_name=f"costo_{elegido}.pdf", mime="application/pdf", type="primary",
+                           icon=":material/picture_as_pdf:", key="costos_pdf_ot")
+
+    with centros:
+        st.markdown('<div class="seccion-t">Costo por centro de costo</div>', unsafe_allow_html=True)
+        st.dataframe(res.por_proceso, hide_index=True, width="stretch",
+                     column_config={e: FORMATO_SOLES for e in list(costos.ELEMENTOS) + ["Total"]})
+        st.markdown('<div class="seccion-t">Costos indirectos del mes (CIF)</div>', unsafe_allow_html=True)
+        if periodo is None:
+            st.info("Elige un **mes** arriba para ver y editar sus costos indirectos.")
+        else:
+            cif_mes = tablas.cif[tablas.cif["periodo"].astype(str).str[:7] == periodo][["centro", "concepto", "monto"]]
+            st.caption("Gastos que no se pueden atribuir a una prenda (alquiler, energía, jefatura…). Edítalos y "
+                       "el costo de cada OT se recalcula al instante. «Centro»: " +
+                       ", ".join(f"{k} = {v}" for k, v in costos.CENTROS.items()))
+            editado = st.data_editor(cif_mes.reset_index(drop=True), key=f"cif_editor_{periodo}", num_rows="dynamic",
+                                     hide_index=True, width="stretch", column_config={
+                                         "centro": st.column_config.SelectboxColumn("Centro", options=list(costos.CENTROS),
+                                                                                    required=True),
+                                         "concepto": st.column_config.TextColumn("Concepto", required=True),
+                                         "monto": st.column_config.NumberColumn("Monto (S/)", format="accounting", min_value=0)})
+            guardado = st.session_state.get("costos_cif", {}).get(periodo)
+            if not editado.equals(cif_mes.reset_index(drop=True)) and (guardado is None or not editado.equals(guardado)):
+                st.session_state.setdefault("costos_cif", {})[periodo] = editado.dropna(subset=["centro"])
+                st.rerun()
+            if res.kpis["cif_sin_asignar"]:
+                st.warning(f"**{vistas.soles(res.kpis['cif_sin_asignar'])} de CIF quedaron sin asignar**: son de "
+                           "centros donde ninguna OT tuvo actividad este mes con la base elegida. No se cargan a "
+                           "otras OT para no inflar su costo.")
+            st.markdown('<div class="seccion-t">Cómo se repartieron</div>', unsafe_allow_html=True)
+            asig = res.asignacion.copy()
+            asig["% de la base"] = asig["% de la base"] * 100
+            st.dataframe(asig, hide_index=True, width="stretch", column_config={
+                "Monto": FORMATO_SOLES, "Asignado": FORMATO_SOLES,
+                "% de la base": st.column_config.NumberColumn(format="%.1f %%")})
+
+    with cierre:
+        pagina_cierre(res, periodo)
+
+    with maestros:
+        st.markdown('<div class="seccion-t">Tarifa por hora de mano de obra interna</div>', unsafe_allow_html=True)
+        st.caption("Se usa cuando la liquidación no trae la tarifa. Corte, arreglos y limpieza se hacen en planta; "
+                   "la confección, el bordado y el estampado suelen ir por orden de servicio a talleres externos.")
+        tarifas_df = pd.DataFrame([{"Proceso": k, "Nombre": costos.PROCESOS.get(k, k), "Tarifa por hora": v}
+                                   for k, v in tablas.tarifas.items()])
+        ed = st.data_editor(tarifas_df, hide_index=True, width="stretch", key="editor_tarifas", column_config={
+            "Proceso": st.column_config.TextColumn(disabled=True), "Nombre": st.column_config.TextColumn(disabled=True),
+            "Tarifa por hora": st.column_config.NumberColumn("Tarifa por hora (S/)", format="accounting", min_value=0)})
+        nuevas = dict(zip(ed["Proceso"], ed["Tarifa por hora"]))
+        if nuevas != tablas.tarifas:
+            st.session_state["costos_tarifas"] = nuevas
+            st.rerun()
+        st.markdown('<div class="seccion-t">Centros de costo</div>', unsafe_allow_html=True)
+        st.dataframe(pd.DataFrame([{"Código": k, "Centro de costo": v,
+                                    "Tipo": "Apoyo (se reparte entre todas las OT)" if k == costos.CENTRO_APOYO
+                                    else "Productivo (solo a las OT que pasan por él)"}
+                                   for k, v in costos.CENTROS.items()]), hide_index=True, width="stretch")
+        st.caption("Los cambios de esta pantalla viven en la sesión mientras no se conecte la base de datos: "
+                   "descarga el Excel o cierra el periodo para guardarlos.")
+
+
+def pagina_cierre(res: costos.Resultado, periodo: str | None) -> None:
+    if periodo is None:
+        st.info("El cierre es **por mes**: elige un periodo arriba.")
+        return
+    cierres = st.session_state.setdefault("costos_cierres", {})
+    cerrado = cierres.get(periodo)
+    k = res.kpis
+    st.markdown(f'<div class="seccion-t">Cierre de costos · {nombre_del_mes(periodo)}</div>', unsafe_allow_html=True)
+    revision = [
+        ("OT con costo en el mes", k["ots"] > 0, f"{k['ots']} órdenes de trabajo"),
+        ("Costos indirectos cargados", k["cif_total"] > 0, vistas.soles(k["cif_total"])),
+        ("CIF totalmente asignado", k["cif_sin_asignar"] < 0.01,
+         "todo asignado" if k["cif_sin_asignar"] < 0.01 else f"{vistas.soles(k['cif_sin_asignar'])} sin asignar"),
+        ("Merma bajo 5 % del consumo", (k["merma_pct"] or 0) < 0.05,
+         "—" if k["merma_pct"] is None else f"{k['merma_pct']:.1%}"),
+    ]
+    for nombre, ok, detalle in revision:
+        st.markdown(f"{'✅' if ok else '⚠️'} **{nombre}** — {detalle}")
+    if cerrado:
+        st.success(f"**Periodo cerrado** el {cerrado['fecha']} · costo total {vistas.soles(cerrado['costo_total'])} "
+                   f"· base de CIF: {costos.BASES[cerrado['base']]}. Las cifras del cierre quedan congeladas en su Excel.")
+        st.download_button(f"Excel del cierre {periodo}", cerrado["excel"], file_name=f"cierre_costos_{periodo}.xlsx",
+                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                           icon=":material/lock:", type="primary", key="cierre_excel")
+        st.button("Reabrir el periodo", key="reabrir", on_click=lambda: cierres.pop(periodo, None))
+        return
+
+    def cerrar():
+        marca = datetime.now().strftime("%d/%m/%Y %H:%M")
+        cierres[periodo] = {"fecha": marca, "base": res.base, "costo_total": k["costo_total"],
+                            "excel": costos.excel_cierre(res, cerrado=f"cerrado el {marca}")}
+
+    st.button(f"Cerrar el periodo {periodo}", type="primary", icon=":material/lock:", on_click=cerrar, key="cerrar",
+              help="Congela el costo de cada OT del mes, la asignación de CIF y genera el Excel del cierre.")
+
+
 def tabla_de_pedidos(pedidos: list[Pedido], hoy: date, dias: int) -> pd.DataFrame:
     filas = []
     for p in pedidos:
@@ -434,6 +665,12 @@ def pagina_conexion(config: dict, fuente: str, es_demo: bool, avisos: list[str])
                     + (f" · opcionales: `{'`, `'.join(cols['opcionales'])}`" if cols["opcionales"] else ""))
     st.caption("Etapas válidas: recibido, produccion, inspeccion, despacho, entregado "
                "(también se aceptan 'Producción', 'Calidad', 'Entregada'…).")
+    st.markdown("**Módulo de costos** (opcional): cuatro consultas más, que salen de la liquidación de órdenes "
+                "de proceso y del kardex del ERP.")
+    for tabla, cols in costos.COLUMNAS.items():
+        st.markdown(f"**costos_{tabla}** — `{'`, `'.join(cols)}`")
+    st.caption("Procesos: COR corte, BOR bordado, EST estampado, CNF confección, LAV lavado, ARR arreglos, "
+               "ACA limpieza y acabado. Centros de costo: los mismos códigos + PLA (planta general, apoyo).")
     st.subheader("Cómo se configura (Secrets de Streamlit Cloud)")
     st.code('''[datos]
 conector = "sql"
@@ -443,7 +680,11 @@ dias_produccion = 15
 [datos.consultas]
 pedidos = "SELECT codigo, cliente, etapa, fecha_pedido, fecha_entrega, avance_produccion, no_conformes, cantidad_despachada, liberado, encuesta, fecha_entregado FROM v_pedidos"
 lineas  = "SELECT codigo_pedido, producto, cantidad FROM v_pedido_lineas"
-eventos = "SELECT codigo_pedido, fecha, etapa, clausula, descripcion, responsable, evidencia FROM v_pedido_eventos"''',
+eventos = "SELECT codigo_pedido, fecha, etapa, clausula, descripcion, responsable, evidencia FROM v_pedido_eventos"
+costos_materiales = "SELECT codigo_pedido, fecha, proceso, codigo, descripcion, um, cant_requerida, cant_consumida, cant_merma, costo_unitario FROM v_liquidacion_mp"
+costos_mano_obra  = "SELECT codigo_pedido, fecha, proceso, personal, horas, tarifa_hora FROM v_liquidacion_mo"
+costos_terceros   = "SELECT codigo_pedido, fecha, proceso, proveedor, cantidad, costo_unitario FROM v_ordenes_servicio"
+costos_cif        = "SELECT periodo, centro, concepto, monto FROM v_cif_mensual"''',
             language="toml")
 
 
@@ -483,6 +724,9 @@ def main() -> None:
     if codigo:
         st.query_params.pop("pedido", None)
 
+    if pagina == "Costos" and vista == INTERNO:
+        pagina_costos(pedidos, hoy, config, fuente, es_demo)
+        return
     if pagina == "Conexión de datos":
         encabezado("Conexión de datos", "De dónde salen los pedidos del tablero", fuente, es_demo,
                    ruta="Conexión de datos")

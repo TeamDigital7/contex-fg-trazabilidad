@@ -254,3 +254,57 @@ async function compartir() {
 }
 document.getElementById("b").addEventListener("click", compartir);
 </script></body></html>"""
+
+
+# --- Costos ----------------------------------------------------------------------
+
+COLORES_ELEMENTO = {  # categórica validada (scripts/validate_palette.js): orden fijo, nunca se recicla
+    "Materia prima": "#2a78d6", "Mano de obra": "#eb6834", "Terceros": "#1baf7a", "Indirectos (CIF)": "#eda100",
+}
+
+
+def soles(n) -> str:
+    return "—" if n is None else f"S/ {n:,.0f}" if abs(n) >= 1000 else f"S/ {n:,.2f}"
+
+
+def estructura_del_costo(elementos: dict[str, float]) -> str:
+    """Parte de un todo: una barra al 100 % con etiqueta directa y leyenda (nunca solo color)."""
+    total = sum(elementos.values()) or 1
+    segmentos, leyenda = [], []
+    for nombre, valor in elementos.items():
+        pct = valor / total
+        color = COLORES_ELEMENTO.get(nombre, "#909090")
+        etiqueta = f"{pct:.0%}" if pct >= 0.07 else ""
+        segmentos.append(f'<div class="seg" style="width:{pct * 100:.2f}%;background:{color}" '
+                         f'title="{esc(nombre)}: {esc(soles(valor))} ({pct:.1%})"><span>{etiqueta}</span></div>')
+        leyenda.append(f'<div class="ley"><i style="background:{color}"></i><span>{esc(nombre)}</span>'
+                       f'<b>{esc(soles(valor))}</b><small>{pct:.1%}</small></div>')
+    return (f'<div class="caja grafico"><div class="graf-t">Estructura del costo</div>'
+            f'<div class="graf-s">De cada sol que cuesta producir, cuánto va a cada elemento</div>'
+            f'<div class="apilada">{"".join(segmentos)}</div><div class="leyenda">{"".join(leyenda)}</div></div>')
+
+
+def barras_por_centro(filas: list[tuple[str, float]], titulo: str, subtitulo: str) -> str:
+    """Magnitud por categoría: barras horizontales de un solo color, valor al final de cada barra."""
+    maximo = max((v for _, v in filas), default=0) or 1
+    cuerpo = "".join(
+        f'<div class="hb-fila" title="{esc(n)}: {esc(soles(v))}"><span class="hb-n">{esc(n)}</span>'
+        f'<div class="hb-pista"><div class="hb-barra" style="width:{v / maximo * 100:.2f}%"></div></div>'
+        f'<span class="hb-v">{esc(soles(v))}</span></div>' for n, v in filas)
+    return (f'<div class="caja grafico"><div class="graf-t">{esc(titulo)}</div>'
+            f'<div class="graf-s">{esc(subtitulo)}</div>{cuerpo}</div>')
+
+
+def fila_indicadores_costos(k: dict, periodo: str) -> str:
+    margen = k["margen_pct"]
+    return '<div class="kpis">' + "".join([
+        indicador("Costo de producción", soles(k["costo_total"]), f"{k['ots']} OT · {periodo}", icono="caja"),
+        indicador("Costo unitario promedio", soles(k["costo_unitario"]), f"{k['unidades']:,.0f} prendas", icono="reloj"),
+        indicador("Margen bruto", "—" if margen is None else f"{margen:.1%}",
+                  "OT terminadas, sin IGV" if margen is not None else "elige «Todo el historial»",
+                  "alerta" if (margen is not None and margen < 0.15) else "", "estrella"),
+        indicador("Costo de no calidad", soles(k["no_calidad"]), "merma + arreglos",
+                  "aviso" if k["no_calidad"] else "bien", "escudo"),
+        indicador("OT bajo margen mínimo", str(k["ots_margen_bajo"]), "margen menor a 15 %",
+                  "alerta" if k["ots_margen_bajo"] else "bien", "alerta"),
+    ]) + "</div>"

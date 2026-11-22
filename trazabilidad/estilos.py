@@ -143,6 +143,24 @@ a.tarjeta, a.tarjeta:hover, a.tarjeta:visited { text-decoration:none; color:inhe
 .volver { margin-bottom:.6rem; }
 .volver a { color:var(--accion); text-decoration:none; font-weight:600; font-size:.85rem; }
 
+/* --- Costos: gráficos ---------------------------------------------------------- */
+.grafico { padding:1rem 1.2rem; margin-bottom:1rem; }
+.graf-t { font-weight:700; color:var(--texto); font-size:.95rem; }
+.graf-s { color:var(--suave); font-size:.78rem; margin-bottom:.8rem; }
+.apilada { display:flex; height:30px; border-radius:6px; overflow:hidden; gap:2px; background:var(--tarjeta); }
+.apilada .seg { display:flex; align-items:center; justify-content:center; min-width:2px; }
+.apilada .seg:first-child { border-radius:6px 0 0 6px; } .apilada .seg:last-child { border-radius:0 6px 6px 0; }
+.apilada .seg span { font-size:.72rem; font-weight:700; color:#fff; text-shadow:0 1px 1px rgba(0,0,0,.35); }
+.leyenda { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:.6rem; margin-top:.8rem; }
+.ley { display:grid; grid-template-columns:12px 1fr; column-gap:.45rem; font-size:.78rem; color:var(--texto); }
+.ley i { width:12px; height:12px; border-radius:3px; margin-top:.15rem; grid-row:span 3; }
+.ley b { font-size:.92rem; } .ley small { color:var(--suave); }
+.hb-fila { display:grid; grid-template-columns:150px 1fr 90px; gap:.7rem; align-items:center; padding:.32rem 0; }
+.hb-n { font-size:.8rem; color:var(--texto); }
+.hb-pista { height:14px; }
+.hb-barra { height:100%; background:#2a78d6; border-radius:0 4px 4px 0; min-width:2px; }
+.hb-v { font-size:.8rem; font-weight:600; color:var(--texto); text-align:right; }
+
 /* --- WhatsApp ----------------------------------------------------------------- */
 div.st-key-wsp_pedido button, div.st-key-wsp_cliente button {
   background:#1FA855; border:1px solid #1FA855; border-radius:10px; }
@@ -258,6 +276,8 @@ div.st-key-herramientas [data-testid="stPopover"] button, div[class*="st-key-des
   .paso .bola { margin:0; grid-row:span 2; }
   .paso:not(:last-child)::after { display:none; }
   .timeline li { grid-template-columns:1fr; gap:.2rem; }
+  .leyenda { grid-template-columns:repeat(2, minmax(0,1fr)); }
+  .hb-fila { grid-template-columns:96px 1fr 72px; gap:.4rem; }
   .t-fecha { padding-top:0; }
 }
 </style>
