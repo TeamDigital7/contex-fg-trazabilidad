@@ -244,7 +244,8 @@ class WhatsApp(unittest.TestCase):
         html = vistas.boton_compartir("Hola </script><b>", docs, "https://wa.me/?text=x")
         self.assertEqual(html.count("</script>"), 1)  # el texto no cierra el script
         self.assertIn(base64.b64encode(b"%PDF-1").decode(), html)
-        self.assertIn("navigator.share", html)
+        self.assertIn("window.parent.navigator", html)
+        self.assertIn("n.share(paquete)", html)
 
     def test_sin_numero_no_envia(self):
         meta = FalsoMeta()
