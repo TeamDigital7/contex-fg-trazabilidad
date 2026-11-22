@@ -308,3 +308,75 @@ def fila_indicadores_costos(k: dict, periodo: str) -> str:
         indicador("OT bajo margen mínimo", str(k["ots_margen_bajo"]), "margen menor a 15 %",
                   "alerta" if k["ots_margen_bajo"] else "bien", "alerta"),
     ]) + "</div>"
+
+
+# --- Analítica -------------------------------------------------------------------
+
+def mini_tendencia(serie: list, color: str = "#2a78d6", meta: float | None = None,
+                   ancho: int = 120, alto: int = 34, ancho_css: str = "") -> str:
+    """Sparkline SVG. Un mes sin dato corta la línea en vez de inventar un cero."""
+    valores = [v for v in serie if v is not None and v == v]
+    if len(valores) < 2:
+        return ""
+    bajo, alto_v = min(valores + ([meta] if meta is not None else [])), max(valores + ([meta] if meta is not None else []))
+    rango = (alto_v - bajo) or 1
+    paso = ancho / (len(serie) - 1)
+    y = lambda v: alto - 3 - (v - bajo) / rango * (alto - 6)  # noqa: E731
+    tramos, actual = [], []
+    for i, v in enumerate(serie):
+        if v is None or v != v:
+            if actual:
+                tramos.append(actual)
+            actual = []
+        else:
+            actual.append(f"{i * paso:.1f},{y(v):.1f}")
+    if actual:
+        tramos.append(actual)
+    lineas = "".join(f'<polyline points="{" ".join(t)}" fill="none" stroke="{color}" stroke-width="2" '
+                     f'stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>'
+                     for t in tramos if len(t) > 1)
+    meta_svg = (f'<line x1="0" x2="{ancho}" y1="{y(meta):.1f}" y2="{y(meta):.1f}" stroke="#98A2B3" '
+                f'stroke-dasharray="3 3" stroke-width="1"/>') if meta is not None else ""
+    ultimo = tramos[-1][-1].split(",") if tramos else None
+    punto = (f'<circle cx="{ultimo[0]}" cy="{ultimo[1]}" r="3" fill="{color}"/>'
+             if ultimo and not ancho_css else "")
+    tam = (f'width="100%" height="{alto}" preserveAspectRatio="none"' if ancho_css
+           else f'width="{ancho}" height="{alto}"')
+    return (f'<svg class="spark" viewBox="0 0 {ancho} {alto}" {tam} '
+            f'aria-hidden="true">{meta_svg}{lineas}{punto}</svg>')
+
+
+def tarjeta_hero(titulo: str, valor: str, variacion: float | None, sube_es_bueno: bool, nota: str,
+                 serie: list, unidad_variacion: str = "%") -> str:
+    delta = ""
+    if variacion is not None:
+        bueno = (variacion >= 0) == sube_es_bueno
+        flecha = "▲" if variacion >= 0 else "▼"
+        texto = f"{abs(variacion):.0%}" if unidad_variacion == "%" else f"{abs(variacion) * 100:.1f} pts"
+        delta = (f'<span class="delta {"bien" if bueno else "mal"}">{flecha} {texto}</span>'
+                 f'<span class="delta-n">vs periodo anterior</span>')
+    return (f'<div class="hero"><div class="hero-t">{esc(titulo)}</div><div class="hero-v">{esc(valor)}</div>'
+            f'<div class="hero-d">{delta}</div><div class="hero-nota" title="{esc(nota)}">{esc(nota)}</div>'
+            f'<div class="hero-spark">{mini_tendencia(serie, ancho=240, alto=32, ancho_css="100%")}</div></div>')
+
+
+ICONO_ESTADO = {"verde": "✓", "ambar": "!", "rojo": "✕", "gris": "○"}
+
+
+def tarjeta_sgc(d: dict) -> str:
+    ind = d["indicador"]
+    valor = "Por conectar" if d["valor"] is None else f"{d['valor']:.1%}"
+    color = {"verde": "#1D7A3E", "ambar": "#B7791F", "rojo": "#B42318", "gris": "#98A2B3"}[d["tono"]]
+    detalle = ("Se alimenta del FO-OPE-CONT-02 (Seguimiento de corte), que aún no llega a la app."
+               if d["valor"] is None else esc(ind.formula))
+    propia = '<span class="sgc-propia">meta de la app</span>' if ind.meta_propia else ""
+    return (f'<div class="sgc tono-{d["tono"]}"><div class="sgc-cab"><span class="sgc-n">{esc(ind.nombre)}</span>'
+            f'<span class="chip {d["tono"]}">{ICONO_ESTADO[d["tono"]]} {esc(d["estado"])}</span></div>'
+            f'<div class="sgc-cuerpo"><div><div class="sgc-v">{esc(valor)}</div>'
+            f'<div class="sgc-meta">Meta {esc(ind.meta_texto)} · {esc(ind.frecuencia.lower())} {propia}</div></div>'
+            f'{mini_tendencia(d["serie"], color, ind.bueno)}</div>'
+            f'<div class="sgc-f">{detalle}</div><div class="sgc-fuente">{esc(ind.fuente)}</div></div>')
+
+
+def cabecera_tarjeta(titulo: str, subtitulo: str = "") -> str:
+    return f'<div class="graf-t">{esc(titulo)}</div>' + (f'<div class="graf-s">{esc(subtitulo)}</div>' if subtitulo else "")

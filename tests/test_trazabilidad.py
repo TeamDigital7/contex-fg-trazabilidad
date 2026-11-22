@@ -327,6 +327,61 @@ class Costos(unittest.TestCase):
         self.assertTrue(self.c.pdf_costo_ot(r, "PED-2026-0012", p, HOY, True).startswith(b"%PDF"))
 
 
+class Analitica(unittest.TestCase):
+    def setUp(self):
+        from trazabilidad import analitica, costos
+        self.a = analitica
+        conector = ConectorDemo(HOY)
+        self.pedidos, _ = pedidos_desde_tablas(conector.leer_tablas())
+        self.res = costos.costear(self.pedidos, conector.leer_costos())
+
+    def test_bandas_del_tablero_de_objetivos(self):
+        isc = self.a.INDICADOR["isc"]
+        self.assertEqual(isc.estado(0.90)[0], "Bueno")
+        self.assertEqual(isc.estado(0.82)[0], "Regular")
+        self.assertEqual(isc.estado(0.70)[0], "Malo")
+        nc = self.a.INDICADOR["no_calidad"]  # menor es mejor
+        self.assertEqual(nc.estado(0.01)[0], "Bueno")
+        self.assertEqual(nc.estado(0.06)[0], "Malo")
+        self.assertEqual(isc.estado(None)[0], "Por conectar")
+
+    def test_los_meses_suman_el_total(self):
+        an = self.a.analizar(self.pedidos, self.res, HOY, 12)
+        self.assertEqual(len(an.por_mes), 12)
+        self.assertAlmostEqual(an.por_mes["Ventas"].sum(), an.kpis["ventas"], places=2)
+        self.assertEqual(an.por_mes["Entregados"].sum(), an.kpis["entregados"])
+
+    def test_calidad_del_corte_no_se_inventa(self):
+        an = self.a.analizar(self.pedidos, self.res, HOY, 12)
+        corte = next(d for d in an.indicadores if d["indicador"].clave == "corte")
+        self.assertIsNone(corte["valor"])
+        self.assertEqual(corte["estado"], "Por conectar")
+
+    def test_sin_periodo_anterior_comparable_no_hay_variacion(self):
+        doce = self.a.analizar(self.pedidos, self.res, HOY, 12)  # la demo tiene un año: no hay año anterior
+        self.assertFalse(self.a.comparable(doce))
+        tres = self.a.analizar(self.pedidos, self.res, HOY, 3)
+        self.assertTrue(self.a.comparable(tres))
+
+    def test_filtro_por_cliente(self):
+        cliente = "Minera Los Andes S.A.C. (demo)"
+        an = self.a.analizar(self.pedidos, self.res, HOY, 12, cliente)
+        self.assertEqual(an.por_cliente["Cliente"].tolist(), [cliente])
+
+    def test_sin_costos_tambien_funciona(self):
+        an = self.a.analizar(self.pedidos, None, HOY, 6)
+        self.assertEqual(an.kpis["ventas"], 0)
+        self.assertGreater(an.kpis["entregados"], 0)
+
+    def test_reportes(self):
+        import io, openpyxl
+        an = self.a.analizar(self.pedidos, self.res, HOY, 12)
+        self.assertTrue(self.a.pdf_kpis(an, "Todos", HOY, True).startswith(b"%PDF"))
+        libro = openpyxl.load_workbook(io.BytesIO(self.a.excel_kpis(an, "Todos")))
+        self.assertEqual(libro.sheetnames, ["Indicadores", "Por mes", "Por cliente", "Pedidos en curso",
+                                            "Pareto de materiales"])
+
+
 class ConectorSQLReal(unittest.TestCase):
     """El conector SQL se prueba contra un SQLite de verdad con las tablas de la demo."""
 
@@ -438,6 +493,19 @@ class App(unittest.TestCase):
     def test_el_cliente_no_ve_costos(self):
         at = self.correr(vista="Minera Los Andes S.A.C. (demo)")
         self.assertNotIn("nav_Costos", [b.key for b in at.button])
+        self.assertNotIn("nav_Analítica", [b.key for b in at.button])
+
+    def test_dashboard_de_analitica(self):
+        at = self.correr()
+        at.button(key="nav_Analítica").click().run()
+        self.assertFalse(at.exception, at.exception)
+        self.assertFalse(at.error, [e.value for e in at.error])
+        texto = self.html(at)
+        self.assertIn("Indicadores del sistema de gestión de calidad", texto)
+        self.assertIn("Por conectar", texto)
+        for periodo in ("3 meses", "6 meses"):
+            at.segmented_control(key="dash_periodo").set_value(periodo).run()
+            self.assertFalse(at.exception, at.exception)
 
     def test_lista_y_conexion(self):
         at = self.correr()

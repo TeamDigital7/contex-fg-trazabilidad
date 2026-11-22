@@ -39,6 +39,24 @@ así que lo que el cliente ve en la demo es exactamente lo que verá con sus dat
 Agregar el driver de su base en `requirements.txt` (psycopg2-binary, pymysql,
 pyodbc u oracledb).
 
+## Analítica del negocio (dashboard de KPIs)
+
+Menú **Analítica** (solo equipo interno). Periodo de 3, 6 o 12 meses y filtro por cliente.
+
+- **Indicadores principales**: ventas sin IGV, margen bruto, prendas entregadas, entregas a
+  tiempo y satisfacción, con su mini tendencia mensual y la variación contra el
+  periodo anterior (solo si ese periodo tiene datos comparables).
+- **Indicadores del SGC** con semáforo Bueno / Regular / Malo y las metas de Contex:
+  satisfacción del cliente (FO-EST-CONT-03), cumplimiento del plazo de entrega y
+  conformidad del producto (CA-OPE-CONT-01), tiempo de procesamiento de pedidos
+  (informe final del ERP), margen bruto y costo de no calidad (metas de la app,
+  ajustables) y calidad del corte («Por conectar» hasta tener el FO-OPE-CONT-02:
+  nunca se muestra un número inventado).
+- **Gráficos interactivos** (tooltip al pasar el mouse): ventas contra costo real por
+  mes, pedidos en curso por etapa, entregas a tiempo y conformidad contra la meta,
+  margen por cliente, gasto por material (Pareto) y ranking de clientes.
+- **Reporte de KPIs** descargable en PDF ejecutivo y Excel (5 hojas).
+
 ## Módulo de costos
 
 Menú **Costos** (solo equipo interno; los clientes no ven costos ni márgenes). Costea

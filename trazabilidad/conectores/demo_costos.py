@@ -101,15 +101,15 @@ HORAS_POR_PRENDA = {"COR": 0.035, "ACA": 0.018}
 
 # Gastos indirectos de un mes típico: (centro, concepto, monto S/)
 CIF_MES = [
-    ("COR", "Depreciación cortadora y ploteo", 210.0),
-    ("COR", "Software de tizado (licencia)", 160.0),
-    ("COR", "Energía taller de corte", 130.0),
-    ("ARR", "Mantenimiento máquinas de coser", 120.0),
-    ("PLA", "Alquiler de planta y almacén", 1600.0),
-    ("PLA", "Jefatura de producción", 1300.0),
-    ("PLA", "Movilidad propia y conductor", 520.0),
-    ("PLA", "Energía y agua (general)", 310.0),
-    ("PLA", "Control de calidad (SIG)", 420.0),
+    ("COR", "Depreciación cortadora y ploteo", 420.0),
+    ("COR", "Software de tizado (licencia)", 310.0),
+    ("COR", "Energía taller de corte", 260.0),
+    ("ARR", "Mantenimiento máquinas de coser", 180.0),
+    ("PLA", "Alquiler de planta y almacén", 3200.0),
+    ("PLA", "Jefatura de producción", 2800.0),
+    ("PLA", "Movilidad propia y conductor", 1150.0),
+    ("PLA", "Energía y agua (general)", 640.0),
+    ("PLA", "Control de calidad (SIG)", 900.0),
 ]
 
 ORDEN = ["recibido", "produccion", "inspeccion", "despacho", "entregado"]
@@ -119,12 +119,18 @@ def _cuando(dia: date, hora: int = 10) -> datetime:
     return datetime.combine(dia, time(hora))
 
 
+def total_pedido(p: dict) -> int:
+    return int(p.get("_unidades") or 0)
+
+
 def generar_costos(tablas: Tablas, hoy: date | None = None) -> TablasCosto:
     hoy = hoy or date.today()
     azar = random.Random(77)
     lineas = tablas.lineas
     mp, mo, te = [], [], []
+    unidades = lineas.groupby("codigo_pedido")["cantidad"].sum().to_dict()
     for p in tablas.pedidos.to_dict("records"):
+        p["_unidades"] = unidades.get(p["codigo"], 0)
         etapa = ORDEN.index(p["etapa"])
         if etapa == 0:
             continue  # recién recibido: todavía no hay consumo
@@ -145,7 +151,8 @@ def generar_costos(tablas: Tablas, hoy: date | None = None) -> TablasCosto:
                     continue
                 requerida = round(por_prenda * cant, 2)
                 # Un pedido con no conformes recortó piezas: consume más tela de la que pedía la ficha
-                exceso = 1.12 if (int(p.get("no_conformes") or 0) and proc == "COR") else 1.0
+                nc = int(p.get("no_conformes") or 0)
+                exceso = (1 + 0.07 * nc) if proc == "COR" else 1.0  # más no conformes, más tela recortada
                 consumida = round(requerida * azar.uniform(0.96, 1.05) * exceso, 2)
                 if um == "UND":  # botones, cierres, etiquetas: se cuentan enteros
                     requerida, consumida = round(requerida), round(requerida * azar.uniform(1.0, 1.03))
@@ -165,7 +172,8 @@ def generar_costos(tablas: Tablas, hoy: date | None = None) -> TablasCosto:
                 dia = inicio + timedelta(days=ventanas["ARR"])
                 if dia <= hoy:
                     te.append({"codigo_pedido": p["codigo"], "fecha": _cuando(dia), "proceso": "ARR",
-                               "proveedor": taller, "cantidad": round(cant * 0.06), "costo_unitario": costo})
+                               "proveedor": taller, "cantidad": round(cant * 0.04 * int(p["no_conformes"])),
+                               "costo_unitario": costo})
             for proc in ("COR", "ACA"):
                 ok, dia = toca(proc)
                 if not ok:
@@ -181,7 +189,8 @@ def generar_costos(tablas: Tablas, hoy: date | None = None) -> TablasCosto:
             dia = inicio + timedelta(days=ventanas["ARR"])
             if dia <= hoy:
                 mo.append({"codigo_pedido": p["codigo"], "fecha": _cuando(dia, 14), "proceso": "ARR",
-                           "personal": PERSONAL["ARR"][0], "horas": round(azar.uniform(18, 24), 2),
+                           "personal": PERSONAL["ARR"][0],
+                           "horas": round(int(p["no_conformes"]) * total_pedido(p) * 0.05 * azar.uniform(0.9, 1.1), 2),
                            "tarifa_hora": None})
 
     cols_mp = ["codigo_pedido", "fecha", "proceso", "codigo", "descripcion", "um", "cant_requerida",

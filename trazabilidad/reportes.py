@@ -37,7 +37,7 @@ TONOS = {  # (fondo, texto) de cada etiqueta, iguales a la pantalla
 }
 MESES = ("enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto",
          "septiembre", "octubre", "noviembre", "diciembre")
-_CAMBIOS = {"—": "-", "–": "-", "…": "...", "→": "->", "“": '"', "”": '"', "‘": "'", "’": "'", "•": "-"}
+_CAMBIOS = {"—": "-", "–": "-", "−": "-", "≥": ">=", "≤": "<=", "…": "...", "→": "->", "“": '"', "”": '"', "‘": "'", "’": "'", "•": "-"}
 
 
 def t(texto: object) -> str:

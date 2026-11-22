@@ -39,7 +39,7 @@ PEDIDOS = [
     ("PED-2026-0009", 5, [("Polo piqué blanco con logo", 250)], "entregado", -4, {}),
     ("PED-2026-0010", 3, [("Pantalón drill azul marino", 40), ("Chaleco drill naranja", 40)], "despacho", 2, {"despachado": 22}),
     ("PED-2026-0011", 4, [("Overol drill gris con cinta reflectiva", 100)], "despacho", 5, {}),
-    ("PED-2026-0012", 1, [("Chaleco drill naranja", 130), ("Pantalón jean 14 oz industrial", 120)], "inspeccion", 6, {"no_conformes": 1}),
+    ("PED-2026-0012", 1, [("Chaleco drill naranja", 130), ("Pantalón jean 14 oz industrial", 120)], "inspeccion", 6, {"no_conformes": 3}),
     ("PED-2026-0016", 6, [("Camisa drill beige manga larga", 60)], "inspeccion", 9, {}),
     ("PED-2026-0014", 2, [("Polo piqué blanco con logo", 400)], "produccion", 7, {"avance": 0.30}),
     ("PED-2026-0013", 0, [("Chaleco drill naranja", 150), ("Pantalón drill azul marino", 150)], "produccion", 17, {"avance": 0.55}),
@@ -75,12 +75,45 @@ def _a_las(dia: date, hora: int, minuto: int = 0) -> datetime:
     return datetime.combine(dia, time(hora, minuto))
 
 
+def historial(hoy: date) -> list[tuple]:
+    """Un año de pedidos ya entregados, para que la analítica tenga tendencias reales.
+
+    Van con su propia semilla y DESPUÉS de los pedidos fijos, así el tablero de
+    hoy no cambia. Todos se entregaron hace más de 40 días: no aparecen en la
+    columna «Entregado» (que muestra los últimos 30), solo en la lista y en la
+    analítica.
+    """
+    azar = random.Random(1990)
+    productos = list(PRECIOS)
+    preferidos = {i: azar.sample(productos, 3) for i in range(len(CLIENTES))}
+    salida, contador = [], {}
+    dias = -365
+    while dias < -42:
+        cliente = azar.randrange(len(CLIENTES))
+        lineas = [(p, azar.randrange(40, 410, 10))
+                  for p in azar.sample(preferidos[cliente], azar.choice((1, 1, 2)))]
+        entrega = hoy + timedelta(days=dias)
+        anio = entrega.year
+        contador[anio] = contador.get(anio, 0) + 1
+        codigo = f"PED-{anio}-{contador[anio] + (100 if anio == hoy.year else 0):04d}"
+        extra = {}
+        if azar.random() < 0.82:
+            extra["encuesta"] = azar.choice((5.0, 5.0, 4.8, 4.8, 4.6, 4.5, 4.4, 4.2, 4.0, 3.8, 3.4))
+        if azar.random() < 0.12:
+            extra["tarde"] = azar.randint(1, 7)
+        if azar.random() < 0.15:
+            extra["no_conformes"] = azar.randint(1, 3)
+        salida.append((codigo, cliente, lineas, "entregado", dias, extra))
+        dias += azar.randint(2, 5)
+    return salida
+
+
 def generar_tablas(hoy: date | None = None) -> Tablas:
     hoy = hoy or date.today()
     azar = random.Random(2026)
     filas_pedidos, filas_lineas, filas_eventos = [], [], []
 
-    for codigo, i_cliente, productos, etapa, dias_entrega, extra in PEDIDOS:
+    for codigo, i_cliente, productos, etapa, dias_entrega, extra in PEDIDOS + historial(hoy):
         entrega = hoy + timedelta(days=dias_entrega)
         pedido = entrega - timedelta(days=azar.randint(24, 32))
         pedido = min(pedido, hoy - timedelta(days=1))  # un pedido nunca es del futuro

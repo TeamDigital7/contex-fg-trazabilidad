@@ -15,7 +15,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from trazabilidad import costos, reportes, vistas, whatsapp
+from trazabilidad import analitica, costos, graficos, reportes, vistas, whatsapp
 from trazabilidad.conectores import COLUMNAS, ErrorDeDatos, obtener_conector, pedidos_desde_tablas
 from trazabilidad.estilos import CSS
 from trazabilidad.modelo import (DIAS_PRODUCCION_POR_DEFECTO, ETAPAS_POR_CLAVE, Pedido,
@@ -60,6 +60,7 @@ def parametro(nombre: str) -> str:
 
 MENU = {
     "Tablero": ":material/view_kanban:",
+    "Analítica": ":material/monitoring:",
     "Lista de pedidos": ":material/format_list_bulleted:",
     "Costos": ":material/payments:",
     "Conexión de datos": ":material/database:",
@@ -583,6 +584,134 @@ def pagina_costos(pedidos: list[Pedido], hoy: date, config: dict, fuente: str, e
                    "descarga el Excel o cierra el periodo para guardarlos.")
 
 
+PERIODOS_DASH = {"3 meses": 3, "6 meses": 6, "12 meses": 12}
+
+
+def pagina_analitica(pedidos: list[Pedido], hoy: date, config: dict, fuente: str, es_demo: bool) -> None:
+    encabezado("Analítica del negocio", "Ventas, márgenes, entregas, calidad y satisfacción · indicadores del SGC",
+               fuente, es_demo, ruta="Analítica")
+    clientes = sorted({p.cliente for p in pedidos})
+    f1, f2, f3 = st.columns([2.2, 2.6, 1.3])
+    with f1:
+        periodo = st.segmented_control("Periodo", list(PERIODOS_DASH), default="12 meses", key="dash_periodo",
+                                       width="stretch") or "12 meses"
+    with f2:
+        cliente = st.selectbox("Cliente", ["Todos los clientes"] + clientes, key="dash_cliente",
+                               format_func=lambda c: c if c == "Todos los clientes" else nombre_corto(c))
+    try:
+        base = cargar_costos(json.dumps(config, sort_keys=True, default=str))
+        res = (costos.costear(pedidos, tablas_con_ediciones(base), None, st.session_state.get("costos_base", "horas"), hoy)
+               if base is not None else None)
+    except Exception as exc:
+        st.warning(f"No se pudieron leer los costos ({exc}); los indicadores de margen quedan vacíos.")
+        res = None
+    elegido = None if cliente == "Todos los clientes" else cliente
+    a = analitica.analizar(pedidos, res, hoy, PERIODOS_DASH[periodo], elegido)
+    alcance = "Todos los clientes" if elegido is None else nombre_corto(elegido)
+    with f3:
+        st.markdown('<div style="height:1.75rem"></div>', unsafe_allow_html=True)
+        with st.popover("Reporte", icon=":material/download:", width="stretch"):
+            st.caption(f"Reporte de KPIs · {alcance} · últimos {periodo}")
+            st.download_button("PDF ejecutivo", analitica.pdf_kpis(a, alcance, hoy, es_demo), mime="application/pdf",
+                               file_name=f"reporte_kpis_{hoy:%Y%m%d}.pdf", icon=":material/picture_as_pdf:",
+                               width="stretch", key="kpi_pdf")
+            st.download_button("Excel con el detalle", analitica.excel_kpis(a, alcance),
+                               file_name=f"reporte_kpis_{hoy:%Y%m%d}.xlsx", icon=":material/table_view:",
+                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                               width="stretch", key="kpi_xlsx")
+
+    k, pm = a.kpis, a.por_mes
+    # Sin un periodo anterior comparable no se muestra variación (sería un número enorme y engañoso).
+    prev = a.previos if analitica.comparable(a) else {c: None for c in a.previos}
+    pct = lambda v: "—" if v is None else f"{v:.1%}"  # noqa: E731
+    puntos = lambda x, y: None if x is None or y is None else (x - y)  # noqa: E731
+    heroes = [
+        vistas.tarjeta_hero("Ventas (sin IGV)", vistas.soles(k["ventas"]),
+                            analitica.variacion(k["ventas"], prev["ventas"]), True,
+                            f"{k['entregados']} pedidos · {k['clientes']} clientes", pm["Ventas"].tolist()),
+        vistas.tarjeta_hero("Margen bruto", pct(k["margen_pct"]), puntos(k["margen_pct"], prev["margen_pct"]), True,
+                            vistas.soles(k["margen"]), pm["Margen %"].tolist(), "pts"),
+        vistas.tarjeta_hero("Prendas entregadas", f"{k['unidades']:,}", analitica.variacion(k["unidades"], prev["unidades"]),
+                            True, f"ticket prom. {vistas.soles(k['ticket'])}", pm["Unidades entregadas"].tolist()),
+        vistas.tarjeta_hero("Entregas a tiempo", pct(k["plazo"]), puntos(k["plazo"], prev["plazo"]), True,
+                            "meta ≥ 95 %", pm["A tiempo %"].tolist(), "pts"),
+        vistas.tarjeta_hero("Satisfacción (ISC)", pct(k["isc"]), puntos(k["isc"], prev["isc"]), True,
+                            f"{k['encuestas']} encuestas · meta ≥ 85 %", pm["ISC %"].tolist(), "pts"),
+    ]
+    st.markdown('<div class="heroes">' + "".join(heroes) + "</div>", unsafe_allow_html=True)
+
+    izq, der = st.columns([1.75, 1], gap="medium")
+    with izq, st.container(key="tarjeta_ventas"):
+        st.markdown(vistas.cabecera_tarjeta("Ventas y costo real por mes",
+                                            "Lo entregado cada mes, a precio de venta sin IGV, contra su costo real "
+                                            "(materia prima, mano de obra, terceros e indirectos)"), unsafe_allow_html=True)
+        st.altair_chart(graficos.ventas_y_costo(pm, analitica.mes(hoy)), theme=None, width="stretch")
+        st.caption("\* Mes en curso: todavía no está completo.")
+    with der, st.container(key="tarjeta_pipeline"):
+        st.markdown(vistas.cabecera_tarjeta("Pedidos en curso",
+                                            f"Prendas por etapa (pedidos entre paréntesis) · {k['activos']} pedidos · "
+                                            f"{k['en_riesgo']} en riesgo"), unsafe_allow_html=True)
+        st.altair_chart(graficos.pipeline(a.pipeline), theme=None, width="stretch")
+        st.markdown(f'<div class="graf-s" style="margin-top:.4rem">Nuevos pedidos en el periodo: <b>{k["nuevos"]}</b> · '
+                    f'costo unitario promedio: <b>{vistas.soles(k["costo_unitario"])}</b></div>', unsafe_allow_html=True)
+
+    st.markdown('<div class="seccion-dash"><b>Indicadores del sistema de gestión de calidad</b>'
+                '<span>Metas del Tablero de Objetivos SGC (FO-EST-CONT-03) y de la caracterización de operaciones</span>'
+                '</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sgcs">' + "".join(vistas.tarjeta_sgc(d) for d in a.indicadores) + "</div>",
+                unsafe_allow_html=True)
+
+    c1, c2 = st.columns(2, gap="medium")
+    with c1, st.container(key="tarjeta_cumplimiento"):
+        st.markdown(vistas.cabecera_tarjeta("Entregas a tiempo y producto conforme",
+                                            "Mes a mes contra la meta de 95 % de la caracterización de operaciones"),
+                    unsafe_allow_html=True)
+        st.altair_chart(graficos.cumplimiento(pm, en_curso=analitica.mes(hoy)), theme=None, width="stretch")
+    with c2, st.container(key="tarjeta_clientes"):
+        st.markdown(vistas.cabecera_tarjeta("Margen por cliente", "Margen bruto de lo entregado · la línea marca el "
+                                            "mínimo de 15 %"), unsafe_allow_html=True)
+        pc = a.por_cliente.dropna(subset=["Margen %"]).copy()
+        if len(pc):
+            pc["Cliente corto"] = pc["Cliente"].map(nombre_corto)
+            st.altair_chart(graficos.barras_horizontales(
+                pc, "Cliente corto", "Margen %", ".1%", "Margen", regla=costos.MARGEN_MINIMO,
+                extra_tooltip=[alt_tooltip("Ventas", "Ventas (S/)", ",.0f"), alt_tooltip("Pedidos", "Pedidos", "d")],
+                alto=260), theme=None, width="stretch")
+        else:
+            st.caption("Sin entregas con precio en el periodo.")
+
+    c3, c4 = st.columns(2, gap="medium")
+    with c3, st.container(key="tarjeta_materiales"):
+        st.markdown(vistas.cabecera_tarjeta("¿En qué se va la materia prima?",
+                                            "Gasto por material en el periodo (S/) · los primeros explican la mayor parte"),
+                    unsafe_allow_html=True)
+        if len(a.materiales):
+            st.altair_chart(graficos.barras_horizontales(
+                a.materiales, "Material", "Gasto", ",.0f", "Gasto (S/)",
+                extra_tooltip=[alt_tooltip("% del gasto", "% del gasto", ".1%"),
+                               alt_tooltip("% acumulado", "% acumulado", ".1%")], ordenar=False),
+                theme=None, width="stretch")
+        else:
+            st.caption("Sin consumos de materia prima en el periodo.")
+    with c4, st.container(key="tarjeta_ranking"):
+        st.markdown(vistas.cabecera_tarjeta("Ranking de clientes", "Ordenado por ventas del periodo"),
+                    unsafe_allow_html=True)
+        tabla = a.por_cliente.drop(columns=["Unidades"]).copy()
+        tabla["Cliente"] = tabla["Cliente"].map(nombre_corto)
+        for c in ("Margen %", "A tiempo %", "ISC %"):
+            tabla[c] = tabla[c] * 100
+        st.dataframe(tabla, hide_index=True, width="stretch", height=min(420, 38 + 35 * len(tabla)), column_config={
+            "Ventas": st.column_config.NumberColumn("Ventas (S/)", format="accounting"),
+            "Margen %": st.column_config.ProgressColumn("Margen", format="%.1f %%", min_value=0, max_value=50),
+            "A tiempo %": st.column_config.NumberColumn("A tiempo", format="%.0f %%"),
+            "ISC %": st.column_config.NumberColumn("ISC", format="%.0f %%")})
+
+
+def alt_tooltip(campo: str, titulo: str, formato: str):
+    import altair as alt
+    return alt.Tooltip(f"{campo}:Q", title=titulo, format=formato)
+
+
 def pagina_cierre(res: costos.Resultado, periodo: str | None) -> None:
     if periodo is None:
         st.info("El cierre es **por mes**: elige un periodo arriba.")
@@ -747,6 +876,9 @@ def main() -> None:
     if codigo:
         st.query_params.pop("pedido", None)
 
+    if pagina == "Analítica" and vista == INTERNO:
+        pagina_analitica(pedidos, hoy, config, fuente, es_demo)
+        return
     if pagina == "Costos" and vista == INTERNO:
         pagina_costos(pedidos, hoy, config, fuente, es_demo)
         return
