@@ -130,19 +130,19 @@ def barra_lateral(clientes: dict[str, int], fuente: str, es_demo: bool) -> tuple
             return op if op == INTERNO else nombre_corto(op)
 
         vista = st.selectbox("Cliente", opciones, index=indice, format_func=etiqueta_cliente,
-                             help="Cada cliente ve solo sus pedidos. «Todos los clientes» muestra todos.")
+                             help="Filtra el tablero, la lista y la analítica por cliente. Uso interno de Contex.")
         if vista != pedida:
             st.query_params["vista"] = vista
         n = total if vista == INTERNO else clientes[vista]
-        nombre = "Equipo Contex" if vista == INTERNO else nombre_corto(vista)
-        rol = (f"Vista interna · {n} pedidos" if vista == INTERNO
-               else f"Vista del cliente · {n} pedido{'s' if n != 1 else ''}")
+        nombre = "Equipo Contex"
+        rol = (f"Uso interno · {n} pedidos" if vista == INTERNO
+               else f"Filtrado: {nombre_corto(vista)} · {n} pedido{'s' if n != 1 else ''}")
         st.markdown(f'<div class="cuenta"><div class="avatar">{vistas.esc(iniciales(nombre))}</div>'
                     f'<div><b>{vistas.esc(nombre)}</b><span>{rol}</span></div></div>',
                     unsafe_allow_html=True)
 
-        # Costos y márgenes son información interna: un cliente nunca los ve.
-        paginas = list(MENU) if vista == INTERNO else ["Tablero", "Lista de pedidos"]
+        # La app es de uso interno: elegir un cliente solo filtra, nunca esconde pantallas.
+        paginas = list(MENU)
         if st.session_state.get("pagina") not in paginas:
             st.session_state["pagina"] = paginas[0]
         actual = st.session_state["pagina"]
@@ -566,13 +566,15 @@ def pagina_costos(pedidos: list[Pedido], hoy: date, config: dict, fuente: str, e
         st.markdown('<div class="seccion-t">Tarifa por hora de mano de obra interna</div>', unsafe_allow_html=True)
         st.caption("Se usa cuando la liquidación no trae la tarifa. Corte, arreglos y limpieza se hacen en planta; "
                    "la confección, el bordado y el estampado suelen ir por orden de servicio a talleres externos.")
-        tarifas_df = pd.DataFrame([{"Proceso": k, "Nombre": costos.PROCESOS.get(k, k), "Tarifa por hora": v}
-                                   for k, v in tablas.tarifas.items()])
+        # Todos los procesos, aunque la fuente no traiga tarifas (el ERP no las tiene): las que falten van en 0.
+        tarifas_df = pd.DataFrame([{"Proceso": k, "Nombre": nombre, "Tarifa por hora": float(tablas.tarifas.get(k) or 0)}
+                                   for k, nombre in costos.PROCESOS.items()],
+                                  columns=["Proceso", "Nombre", "Tarifa por hora"])
         ed = st.data_editor(tarifas_df, hide_index=True, width="stretch", key="editor_tarifas", column_config={
             "Proceso": st.column_config.TextColumn(disabled=True), "Nombre": st.column_config.TextColumn(disabled=True),
             "Tarifa por hora": st.column_config.NumberColumn("Tarifa por hora (S/)", format="accounting", min_value=0)})
-        nuevas = dict(zip(ed["Proceso"], ed["Tarifa por hora"]))
-        if nuevas != tablas.tarifas:
+        nuevas = {k: float(v or 0) for k, v in zip(ed["Proceso"], ed["Tarifa por hora"])}
+        if nuevas != dict(zip(tarifas_df["Proceso"], tarifas_df["Tarifa por hora"])):
             st.session_state["costos_tarifas"] = nuevas
             st.rerun()
         st.markdown('<div class="seccion-t">Centros de costo</div>', unsafe_allow_html=True)
@@ -587,7 +589,8 @@ def pagina_costos(pedidos: list[Pedido], hoy: date, config: dict, fuente: str, e
 PERIODOS_DASH = {"3 meses": 3, "6 meses": 6, "12 meses": 12}
 
 
-def pagina_analitica(pedidos: list[Pedido], hoy: date, config: dict, fuente: str, es_demo: bool) -> None:
+def pagina_analitica(pedidos: list[Pedido], hoy: date, config: dict, fuente: str, es_demo: bool,
+                     vista: str = INTERNO) -> None:
     encabezado("Analítica del negocio", "Ventas, márgenes, entregas, calidad y satisfacción · indicadores del SGC",
                fuente, es_demo, ruta="Analítica")
     clientes = sorted({p.cliente for p in pedidos})
@@ -596,7 +599,10 @@ def pagina_analitica(pedidos: list[Pedido], hoy: date, config: dict, fuente: str
         periodo = st.segmented_control("Periodo", list(PERIODOS_DASH), default="12 meses", key="dash_periodo",
                                        width="stretch") or "12 meses"
     with f2:
-        cliente = st.selectbox("Cliente", ["Todos los clientes"] + clientes, key="dash_cliente",
+        opciones_cli = ["Todos los clientes"] + clientes
+        # Arranca con el cliente elegido en la barra lateral; la clave cambia con él para que lo siga.
+        cliente = st.selectbox("Cliente", opciones_cli, key=f"dash_cliente_{vista}",
+                               index=opciones_cli.index(vista) if vista in opciones_cli else 0,
                                format_func=lambda c: c if c == "Todos los clientes" else nombre_corto(c))
     try:
         base = cargar_costos(json.dumps(config, sort_keys=True, default=str))
@@ -646,7 +652,7 @@ def pagina_analitica(pedidos: list[Pedido], hoy: date, config: dict, fuente: str
                                             "Lo entregado cada mes, a precio de venta sin IGV, contra su costo real "
                                             "(materia prima, mano de obra, terceros e indirectos)"), unsafe_allow_html=True)
         st.altair_chart(graficos.ventas_y_costo(pm, analitica.mes(hoy)), theme=None, width="stretch")
-        st.caption("\* Mes en curso: todavía no está completo.")
+        st.caption("\\* Mes en curso: todavía no está completo.")
     with der, st.container(key="tarjeta_pipeline"):
         st.markdown(vistas.cabecera_tarjeta("Pedidos en curso",
                                             f"Prendas por etapa (pedidos entre paréntesis) · {k['activos']} pedidos · "
@@ -876,10 +882,10 @@ def main() -> None:
     if codigo:
         st.query_params.pop("pedido", None)
 
-    if pagina == "Analítica" and vista == INTERNO:
-        pagina_analitica(pedidos, hoy, config, fuente, es_demo)
+    if pagina == "Analítica":
+        pagina_analitica(pedidos, hoy, config, fuente, es_demo, vista)
         return
-    if pagina == "Costos" and vista == INTERNO:
+    if pagina == "Costos":
         pagina_costos(pedidos, hoy, config, fuente, es_demo)
         return
     if pagina == "Conexión de datos":
@@ -889,7 +895,7 @@ def main() -> None:
         return
 
     subtitulo = ("Seguimiento de todos los pedidos en curso" if vista == INTERNO
-                 else f"Así van los pedidos de {nombre_corto(vista)}")
+                 else f"Pedidos de {nombre_corto(vista)}")
     encabezado("Seguimiento de pedidos", subtitulo, fuente, es_demo, ruta=pagina)
     if pagina == "Lista de pedidos":
         pagina_lista(visibles, hoy, vista, dias, es_demo)

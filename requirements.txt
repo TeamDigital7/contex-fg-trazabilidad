@@ -1,10 +1,10 @@
 streamlit>=1.50
 pandas>=2.0
 sqlalchemy>=2.0
+pyodbc>=5.0      # SQL Server en Windows (driver ODBC de Microsoft)
 fpdf2>=2.7
 xlsxwriter>=3.1
 # Driver de la base del cliente: descomentar el que corresponda al conectar.
 # psycopg2-binary    # PostgreSQL
 # pymysql            # MySQL / MariaDB
-# pyodbc             # SQL Server
 # oracledb           # Oracle

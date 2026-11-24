@@ -134,18 +134,23 @@ La ventana tiene **«Enviar a: Mi número (prueba) | Cliente»** y abre siempre 
   lo **aceptó**. La confirmación de *entregado / leído* (los dos checks) requiere un
   webhook, que es un paso aparte.
 
-## Correr y desplegar
+## Instalación (uso interno, en un servidor de Contex)
+
+La app es de **uso interno de Contex** y corre en un servidor Windows de la empresa, junto al
+SQL Server del ERP: se abre desde la red de la oficina en `http://SERVIDOR:8501`. Guía completa
+en **[docs/INSTALACION_LOCAL.md](docs/INSTALACION_LOCAL.md)**; en resumen:
+
+1. `windows\instalar.bat` · 2. completar `.streamlit\secrets.toml` (plantilla en
+`.streamlit/secrets.local.example.toml`) · 3. `windows\probar_conexion.bat` ·
+4. `windows\servicio_instalar.bat` como administrador (arranca sola con el servidor).
+
+Para desarrollo en cualquier equipo:
 
 ```bash
 pip install -r requirements.txt
 streamlit run app.py
 python tests/test_trazabilidad.py
 ```
-
-En Streamlit Community Cloud: *New app* → este repositorio → `app.py`.
-
-La barra lateral lleva el logo de Contex FYG (`assets/logo_contex.png`) y el menú
-con botones; los colores salen del logo (azul marino `#12386B` y gris `#909090`).
 
 ## Estructura
 
@@ -158,5 +163,5 @@ trazabilidad/conectores/       demo, SQL y el mapeo único tablas → pedidos
 tests/test_trazabilidad.py     modelo, mapeo, SQLite real y la app con AppTest
 ```
 
-**Pendiente antes de producción:** login. Hoy el selector de cliente es libre; con
-datos reales cada cliente debe entrar con su usuario y ver solo lo suyo.
+**El selector «Cliente» es solo un filtro** (la app es interna). Si no todos en Contex deben ver
+costos y márgenes, el siguiente paso es un acceso con usuario y rol.

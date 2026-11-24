@@ -404,6 +404,30 @@ class ConectorSQLReal(unittest.TestCase):
         self.assertEqual([(p.codigo, p.etapa, p.cantidad_total, len(p.eventos)) for p in reales],
                          [(p.codigo, p.etapa, p.cantidad_total, len(p.eventos)) for p in demo])
 
+    def test_la_app_entera_con_una_base_sql(self):
+        """La app leyendo de una base SQL (como el ERP), no de la demo: todas las pantallas."""
+        import tempfile
+        from streamlit.testing.v1 import AppTest
+        c = ConectorDemo(HOY)
+        t, k = c.leer_tablas(), c.leer_costos()
+        with tempfile.TemporaryDirectory() as d:
+            ruta = Path(d) / "erp.db"
+            with sqlite3.connect(ruta) as cx:
+                for n, df in [("pedidos", t.pedidos), ("lineas", t.lineas), ("eventos", t.eventos),
+                              ("mp", k.materiales), ("mo", k.mano_obra), ("te", k.terceros), ("cif", k.cif)]:
+                    df.to_sql(n, cx, index=False)
+            at = AppTest.from_file(str(RAIZ / "app.py"), default_timeout=90)
+            at.secrets["datos"] = {"conector": "sql", "url": f"sqlite:///{ruta}", "consultas": {
+                "pedidos": "SELECT * FROM pedidos", "lineas": "SELECT * FROM lineas", "eventos": "SELECT * FROM eventos",
+                "costos_materiales": "SELECT * FROM mp", "costos_mano_obra": "SELECT * FROM mo",
+                "costos_terceros": "SELECT * FROM te", "costos_cif": "SELECT * FROM cif"}}
+            at.run()
+            for pagina in ("Tablero", "Analítica", "Lista de pedidos", "Costos", "Conexión de datos"):
+                at.button(key=f"nav_{pagina}").click().run()
+                self.assertFalse(at.exception, f"{pagina}: {at.exception}")
+                self.assertFalse(at.error, f"{pagina}: {[e.value for e in at.error]}")
+            self.assertFalse(any("Datos de demostración" in m.value for m in at.markdown))
+
     def test_config_incompleta_se_explica(self):
         with self.assertRaisesRegex(ErrorDeDatos, "url"):
             obtener_conector({"conector": "sql"})
@@ -440,7 +464,7 @@ class App(unittest.TestCase):
         texto = self.html(at)
         self.assertIn("Minera Los Andes", texto)
         self.assertNotIn("Pesquera Mar Azul", texto)
-        self.assertNotIn("nav_Conexión de datos", [b.key for b in at.button])
+
 
     def test_detalle(self):
         at = self.correr(pedido="PED-2026-0012")
@@ -490,10 +514,16 @@ class App(unittest.TestCase):
         at.button(key="cerrar").click().run()
         self.assertTrue(any("Periodo cerrado" in x.value for x in at.success))
 
-    def test_el_cliente_no_ve_costos(self):
+    def test_filtrar_por_cliente_no_esconde_pantallas(self):
+        # La app es de uso interno de Contex: el selector de cliente solo filtra.
         at = self.correr(vista="Minera Los Andes S.A.C. (demo)")
-        self.assertNotIn("nav_Costos", [b.key for b in at.button])
-        self.assertNotIn("nav_Analítica", [b.key for b in at.button])
+        claves = [b.key for b in at.button]
+        for pagina in ("Tablero", "Analítica", "Lista de pedidos", "Costos", "Conexión de datos"):
+            self.assertIn(f"nav_{pagina}", claves)
+        at.button(key="nav_Analítica").click().run()
+        self.assertFalse(at.exception, at.exception)
+        self.assertEqual(at.selectbox(key="dash_cliente_Minera Los Andes S.A.C. (demo)").value,
+                         "Minera Los Andes S.A.C. (demo)")
 
     def test_dashboard_de_analitica(self):
         at = self.correr()
